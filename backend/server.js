@@ -115,11 +115,36 @@ app.use((req, res, next) => {
 });
 
 // --- Rate Limiters (per-IP) ---
+const SCAN_CIRCUIT_FAILURE_THRESHOLD = Number(process.env.SCAN_CIRCUIT_FAILURE_THRESHOLD) || 8;
+const SCAN_CIRCUIT_RESET_MS = Number(process.env.SCAN_CIRCUIT_RESET_MS) || 120000;
+const SCAN_CIRCUIT_HALF_OPEN_MS = Number(process.env.SCAN_CIRCUIT_HALF_OPEN_MS) || 15000;
+const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS) || 25;
+const MAX_WS_FRAME_BYTES = 1024 * 1024; // 1 MiB max frame
 const bulkCheckLimiter = new RateLimiter({ windowMs: 60000, max: 5, name: 'bulk-check' });
 const messageLimiter = new RateLimiter({ windowMs: 60000, max: 120, name: 'message-send' });
 const aiGenerateLimiter = new RateLimiter({ windowMs: 60000, max: 60, name: 'ai-generate' });
 const authActionLimiter = new RateLimiter({ windowMs: 60000, max: 10, name: 'auth-action' });
 const profilePicLimiter = new RateLimiter({ windowMs: 60000, max: 120, name: 'profile-picture' });
+const importBulkLimiter = new RateLimiter({ windowMs: 60000, max: 5, name: 'import-bulk' });
+const wsControlLimiter = new RateLimiter({ windowMs: 60000, max: 300, name: 'ws-control' });
+
+// --- Server-side request governance / circuit breaker ---
+// A persistent, cross-scan circuit breaker. Unlike the per-scan anomaly stop
+// (which resets on each new scan), this breaker survives across scans: if the
+// linked account repeatedly fails hard (risk signals, session loss, anomalies),
+// scan starts are refused until the breaker half-opens and a fresh probe
+// succeeds. This implements the "fail closed under sustained abnormal error
+// rates" requirement at the campaign level, not just within a single scan.
+const scanCircuitBreaker = new CircuitBreaker({
+  name: 'scan-upstream',
+  failureThreshold: SCAN_CIRCUIT_FAILURE_THRESHOLD,
+  resetMs: SCAN_CIRCUIT_RESET_MS,
+  halfOpenMs: SCAN_CIRCUIT_HALF_OPEN_MS,
+  onStateChange: (name, state, err) => {
+    console.log(`[CIRCUIT] ${name} -> ${state}${state === 'open' ? ` (${String(err?.message || '')})` : ''}`);
+    appendShieldLog('WARN', `Scan circuit breaker ${state}`, { name, state, error: err && safeError(err, false) });
+  }
+});
 
 // Single-flight lock so only one bulk check runs at a time (prevents concurrent
 // runs hammering WhatsApp from WS + REST paths simultaneously)
@@ -661,6 +686,32 @@ const bulkCheckJob = {
   consecutiveNetErrors: 0, // consecutive connectivity-type errors (drives auto-resume backoff)
 };
 
+// --- Duplicate scan-submission guard (idempotency) ---
+// A client that double-submits the exact same batch twice (double-click, retry
+// loop, reconnect echo) must not start two scans back-to-back. We remember the
+// hash of the last submitted batch and refuse an identical re-submission until
+// it ages out of the dedup window.
+const lastScanHash = { value: null, at: 0 };
+const SCAN_DEDUP_MS = 30000;
+
+function computeScanHash(numbers) {
+  const key = Array.isArray(numbers) ? numbers.slice(0, 10000).join('|') : '';
+  return crypto.createHash('sha256').update(key).digest('hex').slice(0, 32);
+}
+
+// Returns null when a scan start is allowed, or an error reason string when the
+// exact same batch was just submitted and is still inside the dedup window.
+function guardDuplicateScanStart(numbers) {
+  if (!Array.isArray(numbers) || numbers.length === 0) return null;
+  const hash = computeScanHash(numbers);
+  if (lastScanHash.value === hash && Date.now() - lastScanHash.at < SCAN_DEDUP_MS) {
+    return 'This exact batch was just submitted. Duplicate scan skipped.';
+  }
+  lastScanHash.value = hash;
+  lastScanHash.at = Date.now();
+  return null;
+}
+
 function pauseBulkCheck() {
   if (!bulkCheckJob.active) return;
   if (bulkCheckJob.state !== 'SCANNING' && bulkCheckJob.state !== 'STARTING' && bulkCheckJob.state !== 'RESUMING') return;
@@ -761,7 +812,21 @@ async function runBulkCheck({ numbers, phone, countryCode, delayMs, shieldMode, 
     broadcastAll({ type: 'BULK_CHECK_INTERRUPTED', reason: 'No valid numbers provided' });
     return;
   }
+
+  // Persistent circuit breaker: refuse to start when the upstream has been
+  // repeatedly failing across scans (fail closed) so a campaign can never
+  // hammer a degraded session back-to-back scan after scan.
+  if (!scanCircuitBreaker.isAvailable) {
+    broadcastAll({ type: 'BULK_CHECK_INTERRUPTED', reason: 'Scan safety circuit is open from repeated failures. Please wait a few minutes before retrying.' });
+    audit({ action: 'scan.blocked', outcome: 'blocked', code: 'CIRCUIT_OPEN', detail: `${sanitized.length} numbers requested` });
+    return;
+  }
+
   if (whatsAppService.status !== 'CONNECTED' || !whatsAppService.sock) {
+    // A non-connected session is an upstream unavailability signal — count it
+    // toward the circuit so rapid scan starts against a dead session trip the
+    // breaker instead of looping forever.
+    scanCircuitBreaker.recordFailure(new Error('WhatsApp not connected'));
     broadcastAll({ type: 'BULK_CHECK_INTERRUPTED', reason: 'WhatsApp is not connected. Please link your device first.' });
     return;
   }
@@ -860,6 +925,7 @@ async function runBulkCheck({ numbers, phone, countryCode, delayMs, shieldMode, 
       const result = await whatsAppService.checkNumber(num, { shouldStop: () => !!bulkCheckJob.stopped });
       consecutiveFailures = 0; // a clean lookup resets the failure streak
       bulkCheckJob.consecutiveNetErrors = 0; // connectivity recovered
+      scanCircuitBreaker.recordSuccess(); // a clean upstream response closes/keeps the circuit
       const parsed = {
         ...result,
         formatted: result.formatted || `+${cleanNum}`,
@@ -884,6 +950,7 @@ async function runBulkCheck({ numbers, phone, countryCode, delayMs, shieldMode, 
       const riskSignal = /blocked|restricted|rate\s*limit|too\s*many\s*request|suspended|banned?\b|unauthori[sz]ed|forbidden|connection\s*replaced/i.test(err.message || '');
       if (riskSignal) {
         bulkCheckJob.stopped = true;
+        scanCircuitBreaker.recordFailure(err); // account-level risk => feed the persistent circuit
         appendShieldLog('ERROR', `Risk signal (${err.message}). Stopping scan to protect the session.`, { jobId, index: i });
         broadcastAll({ type: 'BULK_CHECK_INTERRUPTED', jobId, reason: 'WhatsApp signaled a risk (blocked / rate-limited). Scan stopped to protect the session. All completed results are preserved.' });
         audit({ action: 'scan.risk_signal', outcome: 'stopped', code: 'RISK_SIGNAL', detail: `${err.message} at ${i + 1}/${sanitized.length}` });
@@ -938,6 +1005,7 @@ async function runBulkCheck({ numbers, phone, countryCode, delayMs, shieldMode, 
       // results are preserved and the session auto-restores on the backend.
       if (whatsAppService.status !== 'CONNECTED' || /not connected/i.test(err.message)) {
         bulkCheckJob.stopped = true;
+        scanCircuitBreaker.recordFailure(err); // session loss mid-scan => feed the persistent circuit
         broadcastAll({ type: 'BULK_CHECK_INTERRUPTED', jobId, reason: 'WhatsApp session was lost mid-scan. All completed results are preserved.' });
         audit({ action: 'scan.session_lost', outcome: 'stopped', code: 'SESSION_LOST', detail: `${i + 1}/${sanitized.length} processed` });
         break;
@@ -947,6 +1015,7 @@ async function runBulkCheck({ numbers, phone, countryCode, delayMs, shieldMode, 
       // is being throttled hard). Fail safe — hard-stop instead of hammering.
       if (consecutiveFailures >= SCAN_CONSECUTIVE_ANOMALY) {
         bulkCheckJob.stopped = true;
+        scanCircuitBreaker.recordFailure(err); // sustained anomaly streak => feed the persistent circuit
         appendShieldLog('ERROR', `Anomaly: ${consecutiveFailures} consecutive failures. Stopping scan to protect the session.`, { jobId, index: i, consecutiveFailures });
         broadcastAll({ type: 'BULK_CHECK_INTERRUPTED', jobId, reason: `Too many consecutive failures (${consecutiveFailures}). Scan stopped to protect your account. All completed results are preserved.` });
         audit({ action: 'scan.anomaly', outcome: 'stopped', phone: owner || null, code: 'ANOMALY', detail: `${consecutiveFailures} consecutive failures at ${i + 1}/${sanitized.length}` });
@@ -1327,6 +1396,13 @@ whatsAppService.onMessageStatus((statusData) => {
 
 // --- WebSocket Handler ---
 wss.on('connection', (ws, req) => {
+  // Bound total concurrent WebSocket clients so a flood of sockets can't
+  // exhaust memory or let a single caller spin up many scan controllers.
+  if (clients.size >= MAX_WS_CLIENTS) {
+    appendShieldLog('WARN', 'WebSocket client limit reached; rejecting connection', { limit: MAX_WS_CLIENTS });
+    ws.close(1013, 'Too many connections');
+    return;
+  }
   clients.add(ws);
   ws.isAlive = true;
   ws._rateKey = (
@@ -1368,6 +1444,21 @@ wss.on('connection', (ws, req) => {
   }
 
   ws.on('message', async (raw) => {
+    // --- Per-socket input governance (fail-closed) ---
+    // Bound the size of a single frame so a malformed/oversized payload can't
+    // goad the parser into buffering unbounded data, and rate-limit command
+    // volume per socket (an attacker spamming control frames can't spin the
+    // scan state machine or the send handlers without tripping the limiter).
+    const frameBytes = typeof raw === 'string' ? Buffer.byteLength(raw) : raw.length;
+    if (frameBytes > MAX_WS_FRAME_BYTES) {
+      appendShieldLog('WARN', 'Rejected oversized WebSocket frame', { bytes: frameBytes, type: (ws._rateKey || 'ws') });
+      return;
+    }
+    wsControlLimiter.charge(ws._rateKey);
+    if (wsControlLimiter.isBlocked(ws._rateKey)) {
+      appendShieldLog('WARN', 'WebSocket control rate limit hit', { type: ws._rateKey });
+      return;
+    }
     try {
       const data = JSON.parse(raw.toString());
 
@@ -1516,6 +1607,16 @@ wss.on('connection', (ws, req) => {
 
           if (!bulkCheckLock.tryAcquire()) {
             ws.send(JSON.stringify({ type: 'BULK_CHECK_INTERRUPTED', reason: 'A bulk check is already running. Wait for it to finish or stop it first.' }));
+            break;
+          }
+
+          // Idempotency guard: the exact same batch submitted twice within the
+          // dedup window (double-click / retry echo) is skipped, never re-run.
+          const dupReason = guardDuplicateScanStart(numbers);
+          if (dupReason) {
+            bulkCheckLock.release();
+            ws.send(JSON.stringify({ type: 'BULK_CHECK_INTERRUPTED', reason: dupReason }));
+            audit({ action: 'bulk_check.duplicate_submit', outcome: 'blocked', code: 'DUPLICATE', ip: ws._socket?.remoteAddress || null });
             break;
           }
 
@@ -1887,6 +1988,13 @@ app.post('/api/check-bulk', bulkCheckLimiter.middleware(), async (req, res) => {
 
     if (!(bulkLockAcquired = bulkCheckLock.tryAcquire())) {
       return res.status(429).json({ error: 'A bulk check is already running. Wait for it to finish or stop it first.' });
+    }
+
+    // Idempotency guard: reject an identical re-submission of the same batch
+    // inside the dedup window (double-click / retry echo).
+    const dupReason = guardDuplicateScanStart(sanitized);
+    if (dupReason) {
+      return res.status(409).json({ error: dupReason, code: 'DUPLICATE' });
     }
 
     res.json({ success: true, message: 'Bulk check started', total: sanitized.length });
@@ -2541,11 +2649,18 @@ app.post('/api/message-agent/message/delete', (req, res) => {
 });
 
 // Bulk import contacts from WhatsApp Shield detection results
-app.post('/api/message-agent/import-bulk', async (req, res) => {
+app.post('/api/message-agent/import-bulk', importBulkLimiter.middleware(), async (req, res) => {
   try {
     const { contacts: importContacts, mode = 'manual' } = req.body;
     if (!importContacts || !Array.isArray(importContacts) || importContacts.length === 0) {
       return res.status(400).json({ error: 'No contacts provided' });
+    }
+    // Hard cap on the number of contacts a single import may create — a target
+    // list is a sending surface, so it must be bounded server-side even if the
+    // client is bypassed. Real campaigns import in far smaller batches.
+    const MAX_IMPORT_CONTACTS = Number(process.env.MAX_IMPORT_CONTACTS) || 2000;
+    if (importContacts.length > MAX_IMPORT_CONTACTS) {
+      return res.status(400).json({ error: `Cannot import more than ${MAX_IMPORT_CONTACTS} contacts at once.` });
     }
 
     const existingContacts = loadContacts();

@@ -50,6 +50,33 @@ class RateLimiter {
     return { allowed: true, retryAfterMs: 0 };
   }
 
+  // Read-only check: reports whether the key is currently over the limit WITHOUT
+  // incrementing the counter. Used for passive guards (e.g. WebSocket control
+  // frames) where every legit event already passes through and we only want to
+  // short-circuit a flood.
+  isBlocked(key) {
+    const now = this._now();
+    const entry = this.hits.get(key);
+    if (!entry) return false;
+    if (now - entry.resetAt >= this.windowMs) {
+      this.hits.delete(key);
+      return false;
+    }
+    return entry.count > this.max;
+  }
+
+  // Counts a hit without inspecting the cap; lets a caller charge events
+  // regardless of the limit (used to keep the per-socket counter honest).
+  charge(key) {
+    const now = this._now();
+    let entry = this.hits.get(key);
+    if (!entry || now - entry.resetAt >= this.windowMs) {
+      entry = { count: 0, resetAt: now, firstAt: now };
+      this.hits.set(key, entry);
+    }
+    entry.count += 1;
+  }
+
   middleware() {
     return (req, res, next) => {
       const key = this._keyFor(req);
