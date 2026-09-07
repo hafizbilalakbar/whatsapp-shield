@@ -2,55 +2,53 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Shield, Bot } from 'lucide-react';
 import { cn } from './cn';
+import { SHIELD_HOME, AGENT_HOME, SHIELD_PATHS, AGENT_PATHS } from '../../utils/paths';
 
-// Dashboard is the shared home/control center for both tools — the switcher
-// highlights neither product there.
-const SHIELD_ROUTES = ['/history', '/number-formats', '/settings', '/profile'];
-const AGENT_ROUTES = ['/message-agent'];
+// Active state is derived strictly from the current route — there is NO
+// default product and nothing is highlighted on unrelated pages (Dashboard,
+// Settings, Profile, landing, etc.).
+const activeProduct = (path) => (SHIELD_PATHS.includes(path)
+    ? 'shield'
+    : AGENT_PATHS.includes(path)
+      ? 'agent'
+      : null);
+
+const inactiveClasses =
+  "text-text-secondary hover:text-text-primary transition-colors duration-200 cursor-pointer";
 
 export const ProductSwitcher = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const path = location.pathname;
 
-  // Strict route-derived active state with NO default — pages not related to
-  // either tool leave Shield AND Agent inactive.
-  const activeProduct = SHIELD_ROUTES.includes(path)
-    ? 'shield'
-    : AGENT_ROUTES.includes(path)
-      ? 'agent'
-      : null;
-  const isShield = activeProduct === 'shield';
-  const isAgent = activeProduct === 'agent';
+  const product = activeProduct(path);
+  const isShield = product === 'shield';
+  const isAgent = product === 'agent';
 
-  const switchTo = (product) => {
-    if (product === 'shield') navigate('/dashboard');
-    else navigate('/message-agent');
+  const switchTo = (next) => {
+    if (next === 'shield') navigate(SHIELD_HOME);
+    else navigate(AGENT_HOME);
   };
 
   return (
     <div className="relative flex items-center bg-surface/60 border border-border/70 rounded-lg p-0.5 shadow-sm">
-      <div
-        className={cn(
-          "absolute top-0.5 bottom-0.5 w-[82px] sm:w-[90px] rounded-md transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-0",
-          isShield
-            ? "left-0.5 bg-primary/10 border border-primary/20"
-            : isAgent
-            ? "left-[calc(50%+0.5px)] bg-[#25D366]/10 border border-[#25D366]/20"
-            : "translate-x-0 border-transparent bg-transparent"
-        )}
-      />
+      {(isShield || isAgent) && (
+        <div
+          className={cn(
+            "absolute top-0.5 bottom-0.5 w-[82px] sm:w-[90px] rounded-md transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-0",
+            isShield
+              ? "left-0.5 bg-primary/10 border border-primary/20"
+              : "left-[calc(50%+0.5px)] bg-[#25D366]/10 border border-[#25D366]/20"
+          )}
+        />
+      )}
       <button
         onClick={() => switchTo('shield')}
         aria-pressed={isShield}
         aria-current={isShield ? 'page' : undefined}
         className={cn(
-          "relative z-10 flex items-center justify-center gap-1.5 w-[82px] sm:w-[90px] py-1.5 rounded-md text-[11px] sm:text-xs font-semibold transition-all duration-200",
-          isShield
-            ? "text-primary cursor-default"
-            : isAgent
-            ? "text-text-muted hover:text-text-secondary cursor-pointer"
-            : "text-text-secondary hover:bg-surface hover:text-text-secondary cursor-pointer"
+          "relative z-10 flex items-center justify-center gap-1.5 w-[82px] sm:w-[90px] py-1.5 rounded-md text-[11px] sm:text-xs font-semibold",
+          isShield ? "text-primary cursor-default" : inactiveClasses
         )}
       >
         <Shield size={13} className={cn(isShield && "text-primary")} />
@@ -61,12 +59,8 @@ export const ProductSwitcher = () => {
         aria-pressed={isAgent}
         aria-current={isAgent ? 'page' : undefined}
         className={cn(
-          "relative z-10 flex items-center justify-center gap-1.5 w-[82px] sm:w-[90px] py-1.5 rounded-md text-[11px] sm:text-xs font-semibold transition-all duration-200",
-          isAgent
-            ? "text-[#25D366] cursor-default"
-            : isShield
-            ? "text-text-muted hover:text-text-secondary cursor-pointer"
-            : "text-text-secondary hover:bg-surface hover:text-text-secondary cursor-pointer"
+          "relative z-10 flex items-center justify-center gap-1.5 w-[82px] sm:w-[90px] py-1.5 rounded-md text-[11px] sm:text-xs font-semibold",
+          isAgent ? "text-[#25D366] cursor-default" : inactiveClasses
         )}
       >
         <Bot size={13} className={cn(isAgent && "text-[#25D366]")} />

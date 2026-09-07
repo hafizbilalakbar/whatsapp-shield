@@ -31,6 +31,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../co
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { cn } from '../components/ui/cn';
+import { SHIELD_HOME } from '../utils/paths';
 import { SafetySettings } from './components/SafetySettings';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { AiProviderSettings } from './components/AiProviderSettings';
@@ -52,7 +53,7 @@ const THEME_OPTIONS = [
 
 const shieldWorkspace = [
   { to: '/profile', label: 'Profile', description: 'Identity, session & validation stats', icon: User },
-  { to: '/dashboard', label: 'Dashboard', description: 'Validation workflow & campaign setup', icon: LayoutDashboard },
+  { to: SHIELD_HOME, label: 'Dashboard', description: 'Validation workflow & campaign setup', icon: LayoutDashboard },
   { to: '/history', label: 'History', description: 'Past campaigns, exports & data management', icon: History },
 ];
 

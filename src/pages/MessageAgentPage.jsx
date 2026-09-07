@@ -25,6 +25,7 @@ import MetaConnection from './components/meta/MetaConnection';
 import AiAgents from './components/meta/AiAgents';
 import MetaCampaigns from './components/meta/MetaCampaigns';
 import MetaDashboard from './components/meta/MetaDashboard';
+import { SHIELD_HOME } from '../utils/paths';
 
 
 const defaultSafetySettings = {
@@ -779,7 +780,7 @@ const MessageAgentPageInner = ({ isAuthenticated, status, sessionUser, logout, n
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem('msgAgent_sidebarOpen') !== 'false'; } catch { return true; }
   });
-  const handleBackToShield = () => navigate('/dashboard');
+  const handleBackToShield = () => navigate(SHIELD_HOME);
 
   useEffect(() => {
     localStorage.setItem('msgAgent_contactPanel', showContactPanel);

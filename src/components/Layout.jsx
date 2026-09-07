@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Shield, LogOut, BookOpen, Info, LayoutDashboard, Hash, History, WifiOff, ArrowUp, Github, Twitter, Linkedin, Send, MessageCircle, MessageSquare, ChevronRight, Zap, Sparkles, Settings } from 'lucide-react';
+import { Menu, X, Shield, LogOut, BookOpen, Info, Hash, History, WifiOff, ArrowUp, Github, Twitter, Linkedin, Send, MessageCircle, MessageSquare, ChevronRight, Zap, Sparkles, Settings } from 'lucide-react';
 import { useTheme } from '../context/ThemeProvider';
 import { useWebSocket } from '../context/WebSocketProvider';
 import { useUserAvatar } from '../hooks/useUserAvatar';
@@ -10,6 +10,7 @@ import { ProfileDropdown } from './ui/ProfileDropdown';
 import { Spinner } from './ui/Spinner';
 import { ToastContainer } from './ui/ToastNotification';
 import { cn } from './ui/cn';
+import { SHIELD_HOME, AGENT_HOME } from '../utils/paths';
 
 const appNavItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -185,7 +186,7 @@ const Layout = ({ children }) => {
     else setMobileOpen(true);
   }, [mobileOpen, closeMobile]);
 
-  const isMessageAgent = path === '/message-agent';
+  const isMessageAgent = path === AGENT_HOME;
 
   const renderMobileItems = (items, startDelay = 0) => (
     <div className="flex flex-col gap-0.5">
@@ -244,7 +245,7 @@ const Layout = ({ children }) => {
           {/* --- Left: Logo + Brand + Product Switcher --- */}
           <div className="flex items-center gap-2 sm:gap-3">
             <Link
-              to={isAuthenticated ? (isMessageAgent ? '/message-agent' : '/dashboard') : '/'}
+              to={isAuthenticated ? (isMessageAgent ? AGENT_HOME : SHIELD_HOME) : '/'}
               className="flex items-center gap-2 group shrink-0"
               aria-label={isMessageAgent ? 'Message Agent home' : 'WhatsApp Shield home'}
             >
@@ -456,7 +457,7 @@ const Layout = ({ children }) => {
                 {isAuthenticated && (
                   <div className="flex flex-col gap-0.5">
                     {renderMobileItems([
-                      { to: ['/dashboard', '/number-formats', '/history'], label: 'WhatsApp Shield', icon: Shield },
+                      { to: [SHIELD_HOME, '/number-formats', '/history'], label: 'WhatsApp Shield', icon: Shield },
                       { to: '/message-agent', label: 'Message Agent', icon: MessageCircle, variant: 'agent' },
                     ], 30)}
                   </div>
@@ -600,7 +601,7 @@ const Layout = ({ children }) => {
             <div className="lg:col-span-2">
               <h4 className="font-display font-semibold text-text-primary text-xs mb-2 md:mb-3 uppercase tracking-wider">Resources</h4>
               <ul className="flex flex-col gap-2 md:gap-3">
-                <li><Link to="/dashboard" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">WhatsApp Shield</Link></li>
+                <li><Link to={SHIELD_HOME} className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">WhatsApp Shield</Link></li>
                 <li><Link to="/message-agent" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">Message Agent</Link></li>
                 <li><Link to="/faq" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">FAQ</Link></li>
                 <li><Link to="/about" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">About Us</Link></li>

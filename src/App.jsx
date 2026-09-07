@@ -24,6 +24,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 
 const PAGE_TITLES = {
   '/': { title: 'WhatsApp Shield — Bulk WhatsApp Number Validation', desc: 'Enterprise-grade platform for validating phone numbers against WhatsApp network with anti-ban shield mode.' },
+  '/shield': { title: 'Shield — WhatsApp Shield', desc: 'Validate WhatsApp numbers in bulk with real-time progress and safety features.' },
   '/dashboard': { title: 'Dashboard — WhatsApp Shield', desc: 'Validate WhatsApp numbers in bulk with real-time progress and safety features.' },
   '/history': { title: 'History — WhatsApp Shield', desc: 'View and manage your past WhatsApp number validation history.' },
   '/privacy-policy': { title: 'Privacy Policy — WhatsApp Shield', desc: 'Privacy policy for WhatsApp Shield — your data stays local.' },
@@ -63,6 +64,7 @@ function App() {
             <div key={location.pathname} className="animate-page-enter flex flex-col flex-1">
               <Routes location={location}>
                 <Route path="/" element={<LandingPage />} />
+                <Route path="/shield" element={<DashboardPage />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/history" element={<CampaignHistoryPage />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />

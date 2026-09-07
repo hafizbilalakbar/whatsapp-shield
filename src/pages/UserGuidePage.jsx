@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Smartphone, ClipboardList, Shield, Activity, FileText, Globe, Check, ArrowRight, Users, Search, MessageCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
+import { SHIELD_HOME } from '../utils/paths';
 
 const STEPS = [
   {
@@ -9,7 +10,7 @@ const STEPS = [
     icon: Smartphone,
     title: 'Connect Your WhatsApp',
     desc: 'Open WhatsApp on your phone, go to Linked Devices, and scan the QR code shown on the Dashboard. Each connection is initiated manually by you — a fresh QR code is generated every time you connect.',
-    ctas: [{ text: 'Scan QR Code', to: '/dashboard', icon: Smartphone }],
+    ctas: [{ text: 'Scan QR Code', to: SHIELD_HOME, icon: Smartphone }],
     wireframe: ({ theme }) => (
       <svg viewBox="0 0 320 140" className="w-full max-w-md" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="0.5" y="0.5" width="319" height="139" rx="11.5" stroke={theme === 'dark' ? '#1F2937' : '#E2E8F0'} fill={theme === 'dark' ? '#111827' : '#FFFFFF'} />
@@ -118,7 +119,7 @@ const STEPS = [
     icon: FileText,
     title: 'View and Export Results',
     desc: 'Review a detailed validation breakdown with pie charts and per-number status. Export results to CSV, TXT, JSON, or PDF format with registered counts, unregistered numbers, and profile details included.',
-    ctas: [{ text: 'Go to Dashboard', to: '/dashboard', icon: Activity }],
+    ctas: [{ text: 'Go to Shield', to: SHIELD_HOME, icon: Activity }],
     wireframe: ({ theme }) => (
       <svg viewBox="0 0 320 140" className="w-full max-w-md" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="0.5" y="0.5" width="319" height="139" rx="11.5" stroke={theme === 'dark' ? '#1F2937' : '#E2E8F0'} fill={theme === 'dark' ? '#111827' : '#FFFFFF'} />
@@ -176,7 +177,7 @@ const STEPS = [
     icon: Users,
     title: 'Generate Leads from Validated Numbers',
     desc: 'Convert validated WhatsApp numbers into structured leads with one click. Filter by registration status and country to build targeted lead lists. Each lead captures the WhatsApp profile, avatar, and status text for seamless CRM integration.',
-    ctas: [{ text: 'Start Generating Leads', to: '/dashboard', icon: ArrowRight, variant: 'default' }],
+    ctas: [{ text: 'Start Generating Leads', to: SHIELD_HOME, icon: ArrowRight, variant: 'default' }],
     wireframe: ({ theme }) => (
       <svg viewBox="0 0 320 140" className="w-full max-w-md" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="0.5" y="0.5" width="319" height="139" rx="11.5" stroke={theme === 'dark' ? '#1F2937' : '#E2E8F0'} fill={theme === 'dark' ? '#111827' : '#FFFFFF'} />
@@ -198,7 +199,7 @@ const STEPS = [
     icon: Search,
     title: 'Find Target Businesses by Region',
     desc: 'Use the country breakdown in your validation results to identify high-potential markets. Filter leads by country code and industry tag to segment audiences by region. Export targeted lists for region-specific outreach campaigns with wa.me links.',
-    ctas: [{ text: 'Generate Leads', to: '/dashboard', icon: ArrowRight }],
+    ctas: [{ text: 'Generate Leads', to: SHIELD_HOME, icon: ArrowRight }],
     wireframe: ({ theme }) => (
       <svg viewBox="0 0 320 140" className="w-full max-w-md" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="0.5" y="0.5" width="319" height="139" rx="11.5" stroke={theme === 'dark' ? '#1F2937' : '#E2E8F0'} fill={theme === 'dark' ? '#111827' : '#FFFFFF'} />
@@ -226,7 +227,7 @@ const STEPS = [
     icon: MessageCircle,
     title: 'Start Outreach Campaigns & Track Deals',
     desc: 'Launch outreach campaigns using validated WhatsApp numbers with direct wa.me links. Track campaign status, monitor delivery rates, and manage follow-ups. Every campaign is saved locally in your history for review and conversion measurement.',
-    ctas: [{ text: 'Go to Dashboard', to: '/dashboard', icon: ArrowRight, variant: 'default' }],
+    ctas: [{ text: 'Go to Shield', to: SHIELD_HOME, icon: ArrowRight, variant: 'default' }],
     wireframe: ({ theme }) => (
       <svg viewBox="0 0 320 140" className="w-full max-w-md" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="0.5" y="0.5" width="319" height="139" rx="11.5" stroke={theme === 'dark' ? '#1F2937' : '#E2E8F0'} fill={theme === 'dark' ? '#111827' : '#FFFFFF'} />
@@ -495,7 +496,7 @@ export default function UserGuidePage() {
           <p className="text-text-secondary max-w-lg mx-auto mb-8">
             Connect your WhatsApp, validate your numbers, and start generating leads in minutes.
           </p>
-          <Link to="/dashboard">
+          <Link to={SHIELD_HOME}>
             <Button variant="default" size="lg" className="h-14 px-10 text-lg rounded-full shadow-[0_0_30px_rgba(0,217,126,0.3)] hover:shadow-[0_0_40px_rgba(0,217,126,0.5)] transition-all">
               Start Generating Leads <ArrowRight size={20} className="ml-2" />
             </Button>

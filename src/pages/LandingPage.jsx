@@ -7,6 +7,7 @@ import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import WhatsAppShieldLogo from '../components/ui/WhatsAppShieldLogo';
 import { cn } from '../components/ui/cn';
+import { SHIELD_HOME } from '../utils/paths';
 
 const TESTIMONIALS = [
   { name: 'Ahmed Khan', role: 'Marketing Director', company: 'Sparks Digital, PK', initials: 'AK', color: 'bg-gradient-to-br from-blue-400 to-blue-600', text: 'WhatsApp Shield saved us hours of manual work. Validating 10,000 numbers used to take two days. Now it is done in 30 minutes with zero issues.' },
@@ -154,7 +155,7 @@ const LandingPage = () => {
               <Link to="/user-guide">How It Works <Activity className="ml-2 h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" /></Link>
             </Button>
             <Button size="lg" variant="outline" className="w-full sm:w-auto h-11 sm:h-12 lg:h-14 px-5 sm:px-6 lg:px-8 text-sm lg:text-lg rounded-full" asChild>
-              <Link to="/dashboard">Get Started <ArrowRight className="ml-2 h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" /></Link>
+              <Link to={SHIELD_HOME}>Get Started <ArrowRight className="ml-2 h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" /></Link>
             </Button>
           </motion.div>
           
@@ -334,7 +335,7 @@ const LandingPage = () => {
                    WhatsApp Shield is engineered specifically to prevent your number from being flagged during bulk operations.
                  </p>
                  <Button variant="default" asChild>
-                   <Link to="/dashboard">Activate Shield Mode <ArrowRight className="ml-2 h-3 w-3 sm:h-4 sm:w-4" /></Link>
+                   <Link to={SHIELD_HOME}>Activate Shield Mode <ArrowRight className="ml-2 h-3 w-3 sm:h-4 sm:w-4" /></Link>
                  </Button>
                </div>
 
