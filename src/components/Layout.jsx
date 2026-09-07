@@ -13,7 +13,7 @@ import { cn } from './ui/cn';
 import { SHIELD_HOME, AGENT_HOME } from '../utils/paths';
 
 const appNavItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: SHIELD_HOME, label: 'Shield', icon: Shield },
   { to: '/number-formats', label: 'Numbers', icon: Hash },
   { to: '/history', label: 'History', icon: History },
 ];
@@ -589,7 +589,7 @@ const Layout = ({ children }) => {
             <div className="lg:col-span-2">
               <h4 className="font-display font-semibold text-text-primary text-xs mb-2 md:mb-3 uppercase tracking-wider">Platform</h4>
               <ul className="flex flex-col gap-2 md:gap-3">
-                <li><Link to="/dashboard" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">Dashboard</Link></li>
+                <li><Link to={SHIELD_HOME} className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">Shield</Link></li>
                 <li><Link to="/number-formats" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">Numbers</Link></li>
                 <li><Link to="/history" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">History</Link></li>
                 <li><Link to="/user-guide" className="text-xs md:text-sm font-medium text-text-secondary hover:text-primary transition-colors">Guide</Link></li>
