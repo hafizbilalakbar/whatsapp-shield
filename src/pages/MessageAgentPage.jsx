@@ -20,6 +20,11 @@ import TemplateManager from './components/TemplateManager';
 import CrmPipeline from './components/CrmPipeline';
 import { ProfileOverlay } from './components/ProfileOverlay';
 import { ProfilePhotoViewer } from './components/ProfilePhotoViewer';
+import MessageTemplates from './components/meta/MessageTemplates';
+import MetaConnection from './components/meta/MetaConnection';
+import AiAgents from './components/meta/AiAgents';
+import MetaCampaigns from './components/meta/MetaCampaigns';
+import MetaDashboard from './components/meta/MetaDashboard';
 
 
 const defaultSafetySettings = {
@@ -766,6 +771,11 @@ const MessageAgentPageInner = ({ isAuthenticated, status, sessionUser, logout, n
   const [showContactPanel, setShowContactPanel] = useState(() => {
     try { return localStorage.getItem('msgAgent_contactPanel') !== 'false'; } catch { return true; }
   });
+  const [showMetaTemplates, setShowMetaTemplates] = useState(false);
+  const [showMetaConnection, setShowMetaConnection] = useState(false);
+  const [showMetaAgents, setShowMetaAgents] = useState(false);
+  const [showMetaCampaigns, setShowMetaCampaigns] = useState(false);
+  const [showMetaDashboard, setShowMetaDashboard] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem('msgAgent_sidebarOpen') !== 'false'; } catch { return true; }
   });
@@ -907,12 +917,22 @@ const MessageAgentPageInner = ({ isAuthenticated, status, sessionUser, logout, n
     const openHealth = () => setShowHealthDashboard(true);
     const openTemplates = () => setShowTemplates(true);
     const openCrm = () => setShowCrmPipeline(true);
+    const openMetaTemplates = () => setShowMetaTemplates(true);
+    const openMetaConnection = () => setShowMetaConnection(true);
+    const openMetaAgents = () => setShowMetaAgents(true);
+    const openMetaCampaigns = () => setShowMetaCampaigns(true);
+    const openMetaDashboard = () => setShowMetaDashboard(true);
     window.addEventListener('open-safety-settings', openSafety);
     window.addEventListener('open-ai-settings', openAi);
     window.addEventListener('open-business-profile', openBiz);
     window.addEventListener('open-health-dashboard', openHealth);
     window.addEventListener('open-templates', openTemplates);
     window.addEventListener('open-crm-pipeline', openCrm);
+    window.addEventListener('open-meta-templates', openMetaTemplates);
+    window.addEventListener('open-meta-connection', openMetaConnection);
+    window.addEventListener('open-meta-agents', openMetaAgents);
+    window.addEventListener('open-meta-campaigns', openMetaCampaigns);
+    window.addEventListener('open-meta-dashboard', openMetaDashboard);
     return () => {
       window.removeEventListener('open-safety-settings', openSafety);
       window.removeEventListener('open-ai-settings', openAi);
@@ -920,6 +940,11 @@ const MessageAgentPageInner = ({ isAuthenticated, status, sessionUser, logout, n
       window.removeEventListener('open-health-dashboard', openHealth);
       window.removeEventListener('open-templates', openTemplates);
       window.removeEventListener('open-crm-pipeline', openCrm);
+      window.removeEventListener('open-meta-templates', openMetaTemplates);
+      window.removeEventListener('open-meta-connection', openMetaConnection);
+      window.removeEventListener('open-meta-agents', openMetaAgents);
+      window.removeEventListener('open-meta-campaigns', openMetaCampaigns);
+      window.removeEventListener('open-meta-dashboard', openMetaDashboard);
     };
   }, []);
 
@@ -957,6 +982,11 @@ const MessageAgentPageInner = ({ isAuthenticated, status, sessionUser, logout, n
       <ConversationIntelligence isOpen={showIntelligence} onClose={() => setShowIntelligence(false)} conversationId={activeConversation?.id} />
       <TemplateManager isOpen={showTemplates} onClose={() => setShowTemplates(false)} />
       <CrmPipeline isOpen={showCrmPipeline} onClose={() => setShowCrmPipeline(false)} onSelectContact={(id) => { const conv = conversations.find(c => c.id === id); if (conv) setActiveConversation(conv); setShowCrmPipeline(false); }} />
+      <MessageTemplates isOpen={showMetaTemplates} onClose={() => setShowMetaTemplates(false)} />
+      <MetaConnection isOpen={showMetaConnection} onClose={() => setShowMetaConnection(false)} />
+      <AiAgents isOpen={showMetaAgents} onClose={() => setShowMetaAgents(false)} />
+      <MetaCampaigns isOpen={showMetaCampaigns} onClose={() => setShowMetaCampaigns(false)} />
+      <MetaDashboard isOpen={showMetaDashboard} onClose={() => setShowMetaDashboard(false)} />
       <ProfileOverlay
         conversation={activeConversation}
         isOpen={showProfileOverlay}
@@ -982,6 +1012,50 @@ const MessageAgentPageInner = ({ isAuthenticated, status, sessionUser, logout, n
             {isAuthenticated ? 'Connected' : 'Disconnected'}
           </Badge>
           
+          <div className="mx-0.5 h-4 w-px bg-[rgba(255,255,255,0.08)] hidden sm:block" />
+
+          {/* Official Meta tools */}
+          <button
+            onClick={() => setShowMetaConnection(true)}
+            className="h-6 sm:h-7 px-2 rounded-lg flex items-center gap-1.5 text-[#00A884] hover:bg-[#00A884]/10 transition-colors"
+            title="Meta WhatsApp Business — connect official API"
+          >
+            <Building2 size={11} className="sm:size-[12]" />
+            <span className="text-[10px] font-medium hidden sm:inline">Meta</span>
+          </button>
+          <button
+            onClick={() => setShowMetaTemplates(true)}
+            className="h-6 sm:h-7 px-2 rounded-lg flex items-center gap-1.5 text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[rgba(255,255,255,0.04)] transition-colors"
+            title="Message Templates — AI generate, review, submit to Meta"
+          >
+            <FileText size={11} className="sm:size-[12]" />
+            <span className="text-[10px] font-medium hidden md:inline">Templates</span>
+          </button>
+          <button
+            onClick={() => setShowMetaCampaigns(true)}
+            className="h-6 sm:h-7 px-2 rounded-lg flex items-center gap-1.5 text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[rgba(255,255,255,0.04)] transition-colors"
+            title="Campaigns — schedule approved template sends"
+          >
+            <Kanban size={11} className="sm:size-[12]" />
+            <span className="text-[10px] font-medium hidden lg:inline">Campaigns</span>
+          </button>
+          <button
+            onClick={() => setShowMetaAgents(true)}
+            className="h-6 sm:h-7 px-2 rounded-lg flex items-center gap-1.5 text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[rgba(255,255,255,0.04)] transition-colors"
+            title="AI Agents — auto-reply to incoming Meta messages"
+          >
+            <Cpu size={11} className="sm:size-[12]" />
+            <span className="text-[10px] font-medium hidden lg:inline">AI Agents</span>
+          </button>
+          <button
+            onClick={() => setShowMetaDashboard(true)}
+            className="h-6 sm:h-7 px-2 rounded-lg flex items-center gap-1.5 text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[rgba(255,255,255,0.04)] transition-colors"
+            title="Meta Dashboard — messages, templates, agents, activity"
+          >
+            <BarChart3 size={11} className="sm:size-[12]" />
+            <span className="text-[10px] font-medium hidden lg:inline">Dashboard</span>
+          </button>
+
           {isAuthenticated && safetySettings?.antiBan?.enabled && (
             <Badge variant="success" className="hidden xl:flex items-center gap-1 text-[10px] px-1.5 py-0.5">
               <Shield size={9} />

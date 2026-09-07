@@ -5,7 +5,7 @@ import {
   AlertCircle, ArrowDown, X, Image, FileText, Camera, Mic, MicOff,
   Search, MessageSquare, Sparkles, Lightbulb, Loader2, ShieldBan,
   Bold, Italic, Strikethrough, Code, Trash, Play, CheckCircle2,
-  UserPlus, UserCheck, BookmarkCheck
+  UserPlus, UserCheck, BookmarkCheck, LayoutTemplate, Building2
 } from 'lucide-react';
 import { cn } from '../../components/ui/cn';
 import { Button } from '../../components/ui/Button';
@@ -15,6 +15,9 @@ import { useMessageAgent } from '../MessageAgentPage';
 import { useWebSocket } from '../../context/WebSocketProvider';
 import { ContactAvatar } from './ContactAvatar';
 import { showToast } from '../../components/ui/ToastNotification';
+import { metaApi } from './meta/metaApi';
+import { templateVariables } from './meta/MetaConstants';
+import WhatsAppTemplatePreview from './meta/WhatsAppTemplatePreview';
 
 // Per-chat draft cache so switching conversations preserves the composer text.
 const draftCache = new Map();
@@ -108,11 +111,18 @@ const MessageBubbleBase = ({ message, isLast, onAction }) => {
           )}
         >
           {isAI && !isDeleted && (
-            <div className="flex items-center gap-1.5 mb-1">
-              <div className="w-4 h-4 rounded-full bg-success/20 flex items-center justify-center">
-                <Bot size={9} className="text-success" />
+            <div className="flex items-center justify-between gap-1.5 mb-1">
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-4 rounded-full bg-success/20 flex items-center justify-center">
+                  <Bot size={9} className="text-success" />
+                </div>
+                <span className="text-[10px] font-medium text-success">AI Assistant</span>
               </div>
-              <span className="text-[10px] font-medium text-success">AI Assistant</span>
+              {(message.provider || message.model) && (
+                <span className="text-[9px] font-medium text-text-muted uppercase tracking-wide">
+                  {message.provider}{message.model ? ` • ${message.model}` : ''}
+                </span>
+              )}
             </div>
           )}
           
@@ -388,8 +398,129 @@ const SaveContactPopover = ({ contact, saved, busy, confirmingRemove, onSave, on
   );
 };
 
+// Send an approved Meta template to the open chat.
+const TemplateSendDialog = ({ isOpen, onClose, phone, contactName, onSent }) => {
+  const [templates, setTemplates] = useState([]);
+  const [selectedName, setSelectedName] = useState('');
+  const [values, setValues] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let alive = true;
+    setLoading(true);
+    setError('');
+    metaApi.templates('?status=APPROVED')
+      .then(res => { if (alive) { setTemplates(res.templates || []); if (!res.templates?.length) setError('No approved templates yet. Approve one in Message Templates first.'); } })
+      .catch(e => { if (alive) setError(e.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [isOpen]);
+
+  const selected = templates.find(t => t.name === selectedName);
+  const vars = selected ? templateVariables(selected) : [];
+
+  const handleSend = async () => {
+    if (!selectedName) { setError('Pick a template.'); return; }
+    if (!phone) { setError('This contact has no phone number.'); return; }
+    setBusy(true); setError('');
+    try {
+      const variables = {};
+      vars.forEach(n => {
+        const v = (values[n] || '').trim();
+        if (v) variables[n] = v;
+      });
+      const res = await metaApi.sendTemplate({
+        to: phone.replace(/\D/g, ''),
+        templateName: selectedName,
+        language: selected?.language || 'en',
+        variables,
+      });
+      if (res.success) {
+        onSent(res.message);
+        onClose();
+      } else {
+        setError(res.error || 'Send failed');
+      }
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-3" onClick={onClose}>
+      <div className="w-full max-w-lg bg-[#111B21] border border-[#1F2C33] rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+        <div className="px-3 py-2.5 border-b border-[#1F2C33] flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <LayoutTemplate size={15} className="text-[#00A884]" />
+            <div>
+              <div className="text-xs font-semibold text-[#E9EDEF]">Send template message</div>
+              <div className="text-[10px] text-[#8696A0]">to {contactName || (phone ? `+${phone}` : '…')} via the approved Meta template</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#202C33] transition-colors"><X size={15} className="text-[#8696A0]" /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {error && <div className="rounded-lg bg-error/10 border border-error/30 px-3 py-2 text-[11px] text-error">{error}</div>}
+
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-wider text-[#8696A0] font-medium">Approved template</span>
+            <select
+              value={selectedName}
+              onChange={e => { setSelectedName(e.target.value); setValues({}); }}
+              className="mt-1 w-full bg-[#0B141A] border border-[#1F2C33] rounded-lg px-2.5 py-2 text-xs text-[#E9EDEF] focus:outline-none focus:border-[#00A884]"
+            >
+              <option value="">Select…</option>
+              {templates.map(t => <option key={t.id} value={t.name}>{t.name} — {t.category}</option>)}
+            </select>
+          </label>
+
+          {selected && (
+            <>
+              <div>
+                <WhatsAppTemplatePreview template={selected} values={values} />
+              </div>
+              {vars.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-[#8696A0]">Fill preview values (optional — swap for real content)</div>
+                  {vars.map(n => (
+                    <div key={n} className="flex items-center gap-2">
+                      <span className="text-[10px] bg-[#202C33] px-1.5 py-0.5 rounded border border-[#1F2C33] font-mono text-[#8696A0]">{`{{${n}}}`}</span>
+                      <input
+                        value={values[n] || ''}
+                        onChange={e => setValues(v => ({ ...v, [n]: e.target.value }))}
+                        placeholder={`Sample value ${n}`}
+                        className="flex-1 bg-[#0B141A] border border-[#1F2C33] rounded-lg px-2.5 py-1.5 text-xs text-[#E9EDEF] focus:outline-none focus:border-[#00A884]"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="px-3 py-2.5 border-t border-[#1F2C33] flex items-center justify-end gap-2 shrink-0">
+          <button onClick={onClose} className="h-8 px-3 rounded-lg text-[11px] text-[#8696A0] hover:text-[#E9EDEF] transition-colors">Cancel</button>
+          <button
+            onClick={handleSend}
+            disabled={busy || !selectedName}
+            className="h-8 px-4 rounded-lg bg-[#00A884] text-white text-[11px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-1.5"
+          >
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Send template
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoClick }) => {
-  const { 
+  const {
     activeConversation, setConversations, setActiveConversation, conversations,
     sendMessage: apiSendMessage, generateAiResponse, updateConversation, deleteMessage: apiDeleteMessage,
     unblockContact: apiUnblockContact, sendGateArmed, armSendGate,
@@ -412,7 +543,20 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [showTemplateSend, setShowTemplateSend] = useState(false);
+  const [metaConnected, setMetaConnected] = useState(false);
+  const [officialSend, setOfficialSend] = useState(false);
   const savePopoverRef = useRef(null);
+
+  // Check whether the official Meta connector is live so we can offer the
+  // "send via Meta" path (official Cloud API) in the composer.
+  useEffect(() => {
+    let alive = true;
+    metaApi.status()
+      .then(res => { if (alive) setMetaConnected(res?.connection?.status === 'connected'); })
+      .catch(() => { if (alive) setMetaConnected(false); });
+    return () => { alive = false; };
+  }, []);
 
   const handleSaveContact = useCallback(async () => {
     setSaveBusy(true);
@@ -693,6 +837,7 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
           timestamp: new Date().toISOString(),
           status: 'delivered',
           provider: aiResponseData.provider,
+          model: aiResponseData.model,
           confidence: aiResponseData.confidence,
         };
         appendMessageToConversation(conv.id, aiMessage);
@@ -709,6 +854,49 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
     }
   }, [appendMessageToConversation, apiSendMessage, generateAiResponse]);
 
+  // Send a message/file through the OFFICIAL Meta Cloud API (never gets your
+  // number banned — it uses the WABA's approved phone number). Falls back to the
+  // regular Baileys path if Meta is not connected.
+  const sendViaOfficial = useCallback(async (conv, text, attachment) => {
+    const phone = (conv?.contact?.phone || '').replace(/\D/g, '');
+    if (!phone) throw new Error('This contact has no phone number.');
+    let res;
+    if (attachment?.file) {
+      const buffer = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('File read failed'));
+        reader.readAsDataURL(attachment.file);
+      });
+      res = await metaApi.sendOfficialMedia({
+        to: phone,
+        base64: buffer,
+        mime: attachment.file.type || 'application/octet-stream',
+        filename: attachment.file.name,
+        caption: text || '',
+        contactId: conv.contact?.id,
+      });
+    } else {
+      res = await metaApi.sendOfficialText({ to: phone, text, contactId: conv.contact?.id });
+    }
+    if (!res?.success) {
+      const err = new Error(res?.error || 'Meta send failed');
+      err.code = res?.code;
+      throw err;
+    }
+    const record = res.message || {};
+    return {
+      id: record.id || `meta_${Date.now()}`,
+      text: record.text || text,
+      from: 'me',
+      timestamp: record.createdAt || new Date().toISOString(),
+      status: record.status === 'sent' ? 'sent' : 'sending',
+      meta: true,
+      wamid: record.wamid || '',
+      attachment: attachment ? { name: attachment.file.name, size: attachment.file.size, type: attachment.file.type } : null,
+    };
+  }, []);
+
   const handleSendMessage = useCallback(async () => {
     if (!newMessage.trim() && !pendingAttachment) return;
     if (!activeConversation || composerBlocked || !sendGateArmed) return;
@@ -722,6 +910,7 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
     try {
       const messageText = newMessage.trim();
       const conv = activeConversation;
+      const attachment = pendingAttachment;
       setNewMessage('');
       setReplyTo(null);
       setPendingAttachment(null);
@@ -735,19 +924,31 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
         timestamp,
         status: 'sending',
         replyTo: replyTo ? { text: replyTo.text, from: replyTo.from } : null,
-        attachment: pendingAttachment ? { name: pendingAttachment.file.name, size: pendingAttachment.file.size, type: pendingAttachment.file.type } : null,
+        attachment: attachment ? { name: attachment.file.name, size: attachment.file.size, type: attachment.file.type } : null,
         voiceNote: null,
       };
 
       appendMessageToConversation(conv.id, tempMessage);
 
-      const savedMessage = await apiSendMessage(
-        conv.id,
-        conv.contact?.phone,
-        messageText,
-        'user',
-        conv.mode
-      );
+      let savedMessage;
+      if (officialSend && metaConnected) {
+        // Official Meta Cloud API — safe, no ban risk, uses the WABA number.
+        try {
+          savedMessage = await sendViaOfficial(conv, messageText, attachment);
+        } catch (err) {
+          console.error('Meta send failed, falling back to Baileys:', err);
+          if (err.code === 'META_NOT_CONNECTED') setMetaConnected(false);
+          savedMessage = await apiSendMessage(conv.id, conv.contact?.phone, messageText, 'user', conv.mode);
+        }
+      } else {
+        savedMessage = await apiSendMessage(
+          conv.id,
+          conv.contact?.phone,
+          messageText,
+          'user',
+          conv.mode
+        );
+      }
 
       if (savedMessage) {
         replaceMessageInConversation(conv.id, tempId, savedMessage);
@@ -767,7 +968,7 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
       isSendingRef.current = false;
       setIsSending(false);
     }
-  }, [newMessage, pendingAttachment, activeConversation, composerBlocked, sendGateArmed, replyTo, appendMessageToConversation, apiSendMessage, replaceMessageInConversation, markMessagesFailed, generateAndSendAI]);
+  }, [newMessage, pendingAttachment, activeConversation, composerBlocked, sendGateArmed, replyTo, appendMessageToConversation, apiSendMessage, replaceMessageInConversation, markMessagesFailed, generateAndSendAI, officialSend, metaConnected, sendViaOfficial]);
 
   const handleRetryMessage = async (message) => {
     if (!activeConversation || isSendingRef.current) return;
@@ -1206,6 +1407,14 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
           >
             <Bot size={20} />
           </button>
+          <button
+            onClick={() => { setShowTemplateSend(true); setSaveOpen(false); }}
+            className="msg-icon-btn text-[#8696A0] hover:text-[#00A884]"
+            title="Send an approved Meta template"
+            aria-label="Send template"
+          >
+            <LayoutTemplate size={20} />
+          </button>
           <div className="relative" ref={savePopoverRef}>
             <button
               onClick={() => {
@@ -1518,6 +1727,27 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
           </div>
         )}
 
+        {/* Official Meta toggle (only when connected) */}
+        {metaConnected && (
+          <div className="relative" onMouseDown={e => e.stopPropagation()}>
+            <button
+              onClick={() => setOfficialSend(s => !s)}
+              className={cn(
+                "msg-icon-btn h-8 px-2 rounded-lg flex items-center gap-1 text-[10px] font-medium transition-colors",
+                officialSend
+                  ? "bg-[#00A884]/15 text-[#00A884] border border-[#00A884]/30"
+                  : "text-[#8696A0] hover:text-[#E9EDEF] border border-transparent hover:border-[rgba(255,255,255,0.1)]"
+              )}
+              title={officialSend ? 'Sending via official Meta API (safe, no ban risk). Click to switch to Baileys.' : 'Send via official Meta API (safe, no ban risk). Click to enable.'}
+              aria-label="Toggle official Meta sending"
+            >
+              <Building2 size={13} />
+              <span className="hidden sm:inline">{officialSend ? 'Meta' : 'Meta'}</span>
+              <span className={cn("w-1.5 h-1.5 rounded-full", officialSend ? "bg-[#00A884]" : "bg-[#3B4A54]")} />
+            </button>
+          </div>
+        )}
+
         {/* Emoji button */}
         <div className="relative" onMouseDown={e => e.stopPropagation()}>
           <button
@@ -1619,6 +1849,23 @@ const ChatArea = ({ onBackToList, onToggleContactPanel, onOpenProfile, onPhotoCl
         onClose={() => setDeleteTarget(null)}
         onDeleteForMe={handleDeleteForMe}
         onDeleteForEveryone={handleDeleteForEveryone}
+      />
+
+      {/* Send Template Dialog */}
+      <TemplateSendDialog
+        isOpen={showTemplateSend}
+        onClose={() => setShowTemplateSend(false)}
+        phone={activeConversation?.contact?.phone}
+        contactName={activeConversation?.contact?.name}
+        onSent={(m) => {
+          try {
+            setConversations(prev => prev.map(conv => conv.id === activeConversation.id ? {
+              ...conv,
+              messages: [...(conv.messages || []), m],
+              lastMessage: { text: m.templateName ? `Template: ${m.templateName}` : 'Template sent', timestamp: m.sentAt || new Date().toISOString(), from: 'me', status: 'sent' },
+            } : conv));
+          } catch { /* noop */ }
+        }}
       />
     </div>
   );

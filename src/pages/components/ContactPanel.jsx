@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Phone, MapPin, Clock, Edit, Star, Archive, MessageSquare, TrendingUp, Briefcase, FileText, Tag, X, Plus, Check, Save, Brain, Loader2, Target, ShieldBan, Bot, Trash2, Radio, BookmarkCheck } from 'lucide-react';
+import { Phone, MapPin, Clock, Edit, Star, Archive, MessageSquare, TrendingUp, Briefcase, FileText, Tag, X, Plus, Check, Save, Brain, Loader2, Target, ShieldBan, Bot, Trash2, Radio, BookmarkCheck, LayoutTemplate, Send, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../components/ui/cn';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -8,6 +8,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Ta
 import { Input } from '../../components/ui/Input';
 import { useMessageAgent } from '../MessageAgentPage';
 import { ContactAvatar } from './ContactAvatar';
+import { metaApi } from './meta/metaApi';
+import { templateVariables } from './meta/MetaConstants';
+import WhatsAppTemplatePreview from './meta/WhatsAppTemplatePreview';
 
 const JOURNEY_STAGES = [
   { key: 'new_lead', label: 'New Lead', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30' },
@@ -63,6 +66,25 @@ const ContactPanelBody = ({ onPhotoClick }) => {
   const [aiInsights, setAiInsights] = useState(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
   const insightsForIdRef = useRef(null);
+
+  const [approvedTemplates, setApprovedTemplates] = useState([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [templateVars, setTemplateVars] = useState({});
+  const [templateValues, setTemplateValues] = useState({});
+  const [sendingTemplate, setSendingTemplate] = useState(false);
+  const [templateError, setTemplateError] = useState('');
+  const [templateSent, setTemplateSent] = useState('');
+
+  useEffect(() => {
+    if (activeTab !== 'templates' || !activeConversation?.contact?.phone) return;
+    let alive = true;
+    setLoadingTemplates(true); setTemplateError(''); setTemplateSent('');
+    metaApi.templates('?status=APPROVED')
+      .then(res => { if (alive) setApprovedTemplates(res.templates || []); })
+      .catch(e => { if (alive) setTemplateError(e.message); })
+      .finally(() => { if (alive) setLoadingTemplates(false); });
+    return () => { alive = false; };
+  }, [activeTab, activeConversation?.id]);
 
   useEffect(() => {
     if (activeConversation) {
@@ -323,16 +345,17 @@ const ContactPanelBody = ({ onPhotoClick }) => {
         </button>
       </div>
 
-      {/* Additional Action Tabs: CRM / Notes / Stats */}
+      {/* Additional Action Tabs: CRM / Notes / Stats / Templates */}
       <div className="flex gap-2 px-4 py-4 shrink-0">
         {[
           { key: 'crm', label: 'CRM' },
           { key: 'notes', label: 'Notes' },
           { key: 'stats', label: 'Stats' },
+          { key: 'templates', label: 'Templates' },
         ].map(tab => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => { setActiveTab(tab.key); setTemplateVars({}); setTemplateValues({}); setTemplateError(''); }}
             className={cn(
               "flex-1 h-9 px-3 text-[12px] font-medium rounded-md cursor-pointer transition-all border",
               activeTab === tab.key
@@ -764,6 +787,97 @@ const ContactPanelBody = ({ onPhotoClick }) => {
                 </p>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'templates' && (
+          <div className="msg-detail-section border-b-0">
+            <div className="msg-detail-header">
+              <LayoutTemplate size={12} className="text-[#00A884]" />
+              Approved Templates
+            </div>
+            {templateError && (
+              <div className="rounded-lg bg-error/10 border border-error/30 px-3 py-2 text-[11px] text-error mb-2">{templateError}</div>
+            )}
+            {templateSent && (
+              <div className="rounded-lg bg-success/10 border border-success/30 px-3 py-2 text-[11px] text-success mb-2 flex items-center gap-1.5"><CheckCircle2 size={12} /> {templateSent}</div>
+            )}
+            {loadingTemplates ? (
+              <div className="flex items-center justify-center py-8 text-[11px] text-[#8696A0]"><Loader2 size={13} className="animate-spin mr-2" /> Loading approved templates…</div>
+            ) : approvedTemplates.length === 0 ? (
+              <div className="py-6 text-center">
+                <div className="w-10 h-10 mx-auto rounded-full bg-[#202C33] flex items-center justify-center">
+                  <ShieldCheck size={16} className="text-[#8696A0]" />
+                </div>
+                <p className="mt-2 text-[11px] text-[#8696A0]">No approved templates yet.</p>
+                <p className="text-[10px] text-[#8696A0]/70 mt-0.5">Approve one in Meta → Templates, then send it here in one click.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="text-[10px] text-[#8696A0]">Send a Meta-approved template to {activeConversation.contact.name || `+${activeConversation.contact.phone || ''}`}.</div>
+                <select
+                  value={templateVars.name || ''}
+                  onChange={(e) => { const t = approvedTemplates.find(x => x.name === e.target.value); setTemplateVars(t || {}); setTemplateValues({}); setTemplateError(''); }}
+                  className="w-full bg-[#0B141A] border border-[#1F2C33] rounded-lg px-2.5 py-2 text-[11px] text-[#E9EDEF] focus:outline-none focus:border-[#00A884]"
+                >
+                  <option value="">Select an approved template…</option>
+                  {approvedTemplates.map(t => (
+                    <option key={t.name} value={t.name}>{t.name} — {t.category}</option>
+                  ))}
+                </select>
+
+                {templateVars.name && (
+                  <>
+                    <div className="rounded-xl bg-[#0B141A] border border-[#1F2C33] p-2">
+                      <div className="text-[10px] text-[#8696A0] font-medium mb-1.5">WhatsApp-style preview</div>
+                      <WhatsAppTemplatePreview template={templateVars} values={templateValues} />
+                    </div>
+
+                    {templateVariables(templateVars).length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-[10px] text-[#8696A0]">Template variables</div>
+                        {templateVariables(templateVars).map(n => (
+                          <div key={n} className="flex items-center gap-1.5">
+                            <span className="text-[10px] bg-[#202C33] px-1.5 py-0.5 rounded border border-[#1F2C33] font-mono text-[#8696A0]">{`{{${n}}}`}</span>
+                            <input
+                              value={templateValues[n] || ''}
+                              onChange={e => setTemplateValues(v => ({ ...v, [n]: e.target.value }))}
+                              placeholder={`Value for ${n}`}
+                              className="flex-1 bg-[#0B141A] border border-[#1F2C33] rounded-lg px-2 py-1.5 text-[11px] text-[#E9EDEF] focus:outline-none focus:border-[#00A884]"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <Button
+                      size="sm"
+                      className="w-full h-9"
+                      disabled={sendingTemplate || !activeConversation?.contact?.phone}
+                      onClick={async () => {
+                        setSendingTemplate(true); setTemplateError(''); setTemplateSent('');
+                        try {
+                          const phone = (activeConversation.contact.phone || '').replace(/\D/g, '');
+                          if (!phone) { setTemplateError('This contact has no phone number.'); setSendingTemplate(false); return; }
+                          const variables = {};
+                          templateVariables(templateVars).forEach(n => { if (templateValues[n]?.trim()) variables[n] = templateValues[n].trim(); });
+                          const res = await metaApi.sendTemplate({ to: phone, templateName: templateVars.name, language: templateVars.language || 'en', variables });
+                          if (res.success) {
+                            setTemplateSent(`✓ Template sent to ${activeConversation.contact.name || phone}.`);
+                            setTemplateValues({});
+                          } else {
+                            setTemplateError(res.error || 'Send failed');
+                          }
+                        } catch (e) { setTemplateError(e.message); }
+                        setSendingTemplate(false);
+                      }}
+                    >
+                      {sendingTemplate ? <Loader2 size={12} className="animate-spin mr-1" /> : <Send size={12} className="mr-1" />} Send via Meta
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

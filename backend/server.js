@@ -21,6 +21,9 @@ const {
   HealthRegistry,
 } = require('./services/stability');
 const { audit, rotate: rotateAuditLog } = require('./services/audit');
+const aiManager = require('./services/ai/manager');
+const aiCatalog = require('./services/ai/catalog');
+const aiUsage = require('./services/ai/usage-store');
 
 // Global error containment first — a stray rejection/exception must never take
 // down the whole server (and with it every active session and user).
@@ -403,6 +406,7 @@ const saveSafetySettings = (settings) => saveJsonFile(SAFETY_SETTINGS_FILE, sett
 // --- AI Providers ---
 const loadAiProviders = () => loadJsonFile(AI_PROVIDERS_FILE, []);
 const saveAiProviders = (providers) => saveJsonFile(AI_PROVIDERS_FILE, providers);
+const secureRedact = (p) => ({ ...p, apiKey: p.apiKey ? '••••••••••' : '' });
 
 // --- Business Profile ---
 const loadBusinessProfile = () => loadJsonFile(BUSINESS_PROFILE_FILE, {});
@@ -3081,53 +3085,80 @@ app.get('/api/message-agent/analytics', (req, res) => {
   }
 });
 
-// --- AI Provider Management ---
+// --- AI Provider Management (unified, encrypted, routed) ---
 
 app.get('/api/message-agent/ai-providers', (req, res) => {
   try {
-    const providers = loadAiProviders();
-    // Never ship stored API keys back to the browser — the client only needs an
-    // existence/health flag and the provider metadata. The actual key stays on
-    // the server.
-    const redacted = providers.map(p => ({ ...p, apiKey: p.apiKey ? '***' : '' }));
-    res.json({ success: true, providers: redacted });
+    const providers = aiManager.listForClient();
+    const settings = aiManager.loadSettings();
+    res.json({ success: true, providers, settings, maxProviders: aiCatalog.DEFAULT_MAX_PROVIDERS });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load AI providers' });
   }
 });
 
-app.post('/api/message-agent/ai-providers', (req, res) => {
+app.post('/api/message-agent/ai-providers', async (req, res) => {
   try {
-    const { name, apiKey, provider, priority = 0 } = req.body;
-    
-    if (!name || !apiKey || !provider) {
-      return res.status(400).json({ error: 'Name, API key, and provider required' });
+    const { apiKey, provider, name, displayName, model, priority, enabled } = req.body;
+    if (!provider || !apiKey) {
+      return res.status(400).json({ error: 'Provider and API key are required' });
     }
-    
-    const providers = loadAiProviders();
-    
-    if (providers.length >= 3) {
-      return res.status(400).json({ error: 'Maximum 3 AI providers allowed' });
+    const existing = aiManager.getAll();
+    if (existing.length >= aiCatalog.DEFAULT_MAX_PROVIDERS) {
+      return res.status(400).json({ error: `Maximum ${aiCatalog.DEFAULT_MAX_PROVIDERS} AI providers allowed` });
     }
-    
-    const newProvider = {
-      id: crypto.randomUUID(),
-      name,
-      apiKey: Buffer.from(apiKey).toString('base64'), // Basic obfuscation
-      provider,
-      priority,
-      enabled: true,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-    };
-    
-    providers.push(newProvider);
-    providers.sort((a, b) => a.priority - b.priority);
-    saveAiProviders(providers);
-    
-    res.json({ success: true, provider: { ...newProvider, apiKey: '***' } });
+    const saved = aiManager.add(req.body);
+    let validation = { status: 'configuring', error: null };
+    try {
+      const ok = await aiManager.validateKey({
+        apiKey,
+        provider,
+        model,
+        baseUrl: req.body.baseUrl,
+        azureResource: req.body.azureResource,
+        azureDeployment: req.body.azureDeployment,
+        apiVersion: req.body.apiVersion,
+      });
+      aiManager.update(saved.id, { status: 'connected', validatedAt: new Date().toISOString() });
+      validation = { status: 'connected', error: null, model: ok.result && ok.result.model };
+    } catch (err) {
+      const category = err.category || 'UNKNOWN';
+      const message = err.message || 'Connection could not be verified';
+      aiManager.update(saved.id, { status: 'connection_failed', connectionError: message });
+      validation = { status: 'connection_failed', error: message, category };
+    }
+    res.json({ success: true, provider: secureRedact(saved), validation });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to add AI provider' });
+    res.status(400).json({ error: err.message || 'Failed to add AI provider' });
+  }
+});
+
+app.get('/api/message-agent/ai-providers/catalog', (req, res) => {
+  res.json({ success: true, catalog: aiCatalog.PROVIDER_CATALOG });
+});
+
+app.get('/api/message-agent/ai-providers/usage', (req, res) => {
+  try {
+    res.json({ success: true, ...aiUsage.summary() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load AI usage' });
+  }
+});
+
+app.get('/api/message-agent/ai-routing', (req, res) => {
+  try {
+    res.json({ success: true, settings: aiManager.loadSettings() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load AI routing settings' });
+  }
+});
+
+app.put('/api/message-agent/ai-routing', (req, res) => {
+  try {
+    const settings = aiManager.saveSettings(req.body || {});
+    res.json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save AI routing settings' });
   }
 });
 
@@ -3135,42 +3166,50 @@ app.put('/api/message-agent/ai-providers/:id', (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    
-    const providers = loadAiProviders();
-    const index = providers.findIndex(p => p.id === id);
-    
-    if (index === -1) {
-      return res.status(404).json({ error: 'Provider not found' });
-    }
-    
-    if (updates.apiKey) {
-      updates.apiKey = Buffer.from(updates.apiKey).toString('base64');
-    }
-    
-    providers[index] = { ...providers[index], ...updates };
-    providers.sort((a, b) => a.priority - b.priority);
-    saveAiProviders(providers);
-    
-    res.json({ success: true, provider: { ...providers[index], apiKey: '***' } });
+    const provider = aiManager.update(id, updates);
+    if (!provider) return res.status(404).json({ error: 'Provider not found' });
+    res.json({ success: true, provider: secureRedact(provider), keyPreview: aiManager.decode(provider).slice(-4) });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to update AI provider' });
+    res.status(500).json({ error: err.message || 'Failed to update AI provider' });
   }
 });
 
 app.delete('/api/message-agent/ai-providers/:id', (req, res) => {
   try {
     const { id } = req.params;
-    const providers = loadAiProviders();
-    const filtered = providers.filter(p => p.id !== id);
-    
-    if (filtered.length === providers.length) {
-      return res.status(404).json({ error: 'Provider not found' });
-    }
-    
-    saveAiProviders(filtered);
+    const removed = aiManager.remove(id);
+    if (!removed) return res.status(404).json({ error: 'Provider not found' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete AI provider' });
+  }
+});
+
+app.post('/api/message-agent/ai-providers/:id/test', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!aiManager.findById(id)) return res.status(404).json({ error: 'Provider not found' });
+    const result = await aiManager.testProvider(id);
+    aiManager.update(id, { status: 'connected', validatedAt: new Date().toISOString(), connectionError: '' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    const id = req.params.id;
+    aiManager.update(id, { status: 'connection_failed', connectionError: err.message });
+    res.status(400).json({ success: false, error: err.message, category: err.category });
+  }
+});
+
+app.get('/api/message-agent/ai-providers/:id/models', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const provider = aiManager.findById(id);
+    if (!provider) return res.status(404).json({ error: 'Provider not found' });
+    const models = await aiManager.listModels(provider.provider, aiManager.decode(provider));
+    res.json({ success: true, models });
+  } catch (err) {
+    const { id } = req.params;
+    const provider = aiManager.findById(id);
+    res.json({ success: true, models: provider ? aiCatalog.getModels(provider.provider) : [] });
   }
 });
 
@@ -3187,330 +3226,52 @@ app.post('/api/message-agent/ai-generate', aiGenerateLimiter.middleware(), async
       aiObjective: aiObjective || null,
     };
 
-    const providers = loadAiProviders().filter(p => p.enabled);
-    
-    if (providers.length === 0) {
-      return res.json({ 
-        success: true, 
+    const systemPrompt = buildSystemPrompt(enrichedContact, businessProfile);
+    const history = (conversationHistory || []).slice(-10).map(m => ({
+      role: m.from === 'me' ? 'assistant' : 'user',
+      content: m.text,
+    }));
+
+    if (aiManager.getEnabled().length === 0) {
+      return res.json({
+        success: true,
         response: generateFallbackResponse(message, conversationHistory, contact),
         provider: 'fallback',
-        confidence: 0.5
+        confidence: 0.5,
+        model: null,
       });
     }
 
-    // Try providers in priority order
-    for (const provider of providers) {
-      const circuit = getAiCircuitBreaker(`${provider.name}:${provider.provider}`);
-      try {
-        const apiKey = Buffer.from(provider.apiKey, 'base64').toString('utf8');
-        const result = await circuit.run(() => callAIProvider(provider.provider, apiKey, message, conversationHistory, enrichedContact, businessProfile));
+    const result = await aiManager.complete({ system: systemPrompt, history, user: message, temperature: 0.7, maxTokens: 500 });
 
-        if (result.ok && result.result) {
-          return res.json({
-            success: true,
-            response: result.result.text,
-            provider: provider.name,
-            confidence: result.result.confidence || 0.85
-          });
-        }
-        if (result.circuitOpen) {
-          console.log(`[CIRCUIT] ${provider.name} circuit open — skipping to next provider.`);
-          continue;
-        }
-        console.error(`AI provider ${provider.name} failed:`, safeError(result.error, false));
-        continue; // Try next provider
-      } catch (err) {
-        console.error(`AI provider ${provider.name} failed:`, safeError(err, false));
-        continue; // Try next provider
-      }
+    if (result.ok) {
+      return res.json({
+        success: true,
+        response: result.text,
+        provider: result.provider,
+        providerType: result.providerType,
+        model: result.model,
+        confidence: 0.85,
+        latencyMs: result.latencyMs,
+      });
     }
-
-    // All providers failed, use fallback
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       response: generateFallbackResponse(message, conversationHistory, contact),
       provider: 'fallback',
-      confidence: 0.5
+      confidence: 0.5,
+      aiError: result.error,
     });
   } catch (err) {
     console.error('Error generating AI response:', err);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       response: generateFallbackResponse(req.body.message, req.body.conversationHistory, req.body.contact),
       provider: 'fallback',
-      confidence: 0.5
+      confidence: 0.5,
     });
   }
 });
-
-// --- AI Provider Call Logic ---
-// Bounded provider calls so a slow/unresponsive upstream never holds the send
-// flow hostage (the UI shows "AI is thinking..." while awaiting this).
-const AI_PROVIDER_TIMEOUT_MS = 30000;
-
-// Per-provider circuit breakers: if an upstream keeps failing (5xx, timeouts,
-// auth errors), the circuit opens and requests bypass it instantly to a healthy
-// provider or the fallback — instead of repeatedly hammering the broken service.
-const aiCircuitBreakers = new Map();
-const getAiCircuitBreaker = (name) => {
-  let cb = aiCircuitBreakers.get(name);
-  if (!cb) {
-    cb = new CircuitBreaker({
-      name: `ai:${name}`,
-      failureThreshold: Number(process.env.AI_CIRCUIT_THRESHOLD) || 5,
-      resetMs: Number(process.env.AI_CIRCUIT_RESET_MS) || 30000,
-      onStateChange: (n, state, err) => {
-        console.log(`[CIRCUIT] ${n} -> ${state}${state === 'open' ? ` (${safeError(err, false)})` : ''}`);
-      }
-    });
-    aiCircuitBreakers.set(name, cb);
-  }
-  return cb;
-};
-
-function aiProviderFetch(url, options) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), AI_PROVIDER_TIMEOUT_MS);
-  return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
-}
-
-async function callAIProvider(providerType, apiKey, message, history, contact, businessProfile) {
-  const historyText = (history || []).slice(-10).map(m => 
-    `${m.from === 'me' ? 'Agent' : 'Customer'}: ${m.text}`
-  ).join('\n');
-
-  const systemPrompt = buildSystemPrompt(contact, businessProfile);
-  const fullPrompt = `${systemPrompt}\n\nConversation history:\n${historyText}\n\nCustomer: ${message}\n\nAgent:`;
-
-  // OpenAI API
-  if (providerType === 'openai') {
-    const response = await aiProviderFetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
-      })
-    });
-    
-    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.choices[0].message.content, confidence: 0.9 };
-  }
-  
-  // Anthropic API
-  if (providerType === 'anthropic') {
-    const response = await aiProviderFetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: [
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ]
-      })
-    });
-    
-    if (!response.ok) throw new Error(`Anthropic API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.content[0].text, confidence: 0.9 };
-  }
-
-  // Groq API
-  if (providerType === 'groq') {
-    const response = await aiProviderFetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
-      })
-    });
-    
-    if (!response.ok) throw new Error(`Groq API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.choices[0].message.content, confidence: 0.85 };
-  }
-
-  // Together API
-  if (providerType === 'together') {
-    const response = await aiProviderFetch('https://api.together.xyz/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'meta-llama/Llama-3-70b-chat-hf',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
-      })
-    });
-    
-    if (!response.ok) throw new Error(`Together API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.choices[0].message.content, confidence: 0.85 };
-  }
-
-  // Mistral AI API
-  if (providerType === 'mistral') {
-    const response = await aiProviderFetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'mistral-small-latest',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
-      })
-    });
-    
-    if (!response.ok) throw new Error(`Mistral API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.choices[0].message.content, confidence: 0.85 };
-  }
-
-  // DeepSeek API (OpenAI-compatible)
-  if (providerType === 'deepseek') {
-    const response = await aiProviderFetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
-      })
-    });
-    
-    if (!response.ok) throw new Error(`DeepSeek API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.choices[0].message.content, confidence: 0.85 };
-  }
-
-  // OpenRouter (OpenAI-compatible, supports 100+ models)
-  if (providerType === 'openrouter') {
-    const response = await aiProviderFetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://whatsapp-shield.app',
-        'X-Title': 'WhatsApp Shield'
-      },
-      body: JSON.stringify({
-        model: 'meta-llama/llama-3.1-70b-instruct',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
-      })
-    });
-    
-    if (!response.ok) throw new Error(`OpenRouter API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.choices[0].message.content, confidence: 0.85 };
-  }
-
-  // OpenAI-compatible (generic fallback)
-  if (providerType === 'openai-compatible') {
-    const response = await aiProviderFetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...(history || []).slice(-10).map(m => ({
-            role: m.from === 'me' ? 'assistant' : 'user',
-            content: m.text
-          })),
-          { role: 'user', content: message }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
-      })
-    });
-    
-    if (!response.ok) throw new Error(`OpenAI-compatible API error: ${response.status}`);
-    const data = await response.json();
-    return { text: data.choices[0].message.content, confidence: 0.85 };
-  }
-
-  return null;
-}
 
 function buildSystemPrompt(contact, businessProfile) {
   const bp = businessProfile || {};

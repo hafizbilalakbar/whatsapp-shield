@@ -23,6 +23,9 @@ backend/session_history.json
 backend/campaign_history.json
 backend/safety_settings.json
 backend/ai_providers.json
+backend/ai_usage.json
+backend/ai_routing.json
+backend/.ai-keys/
 backend/business_profile.json
 backend/contacts.json
 backend/blocked_contacts.json

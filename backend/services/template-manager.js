@@ -1,11 +1,8 @@
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const aiManager = require('./ai/manager');
 const uuidv4 = () => crypto.randomUUID();
-
-// Abort unresponsive AI provider calls so recommendation/personalization
-// endpoints never hang on a provider that stops responding.
-const AI_FETCH_TIMEOUT_MS = 30000;
 
 class TemplateManager {
   constructor({ loadTemplates, saveTemplates, aiProvidersPath } = {}) {
@@ -98,21 +95,7 @@ class TemplateManager {
     }));
   }
 
-  _loadAiProviders() {
-    try {
-      if (fs.existsSync(this.aiProvidersPath)) {
-        return JSON.parse(fs.readFileSync(this.aiProvidersPath, 'utf8')).filter(p => p.enabled);
-      }
-    } catch (err) {
-      console.error('Error loading AI providers:', err.message);
-    }
-    return [];
-  }
-
   async _callAIForRecommendation(context) {
-    const providers = this._loadAiProviders();
-    if (providers.length === 0) return null;
-
     const {
       industry = '',
       service = '',
@@ -148,110 +131,11 @@ Previous Templates Used: ${previousTemplates.join(', ') || 'None'}
 
 Generate one recommended WhatsApp template as a JSON object.`;
 
-    for (const provider of providers) {
-      try {
-        const apiKey = Buffer.from(provider.apiKey, 'base64').toString('utf8');
-        const result = await this._callAIProviderAPI(provider.provider, apiKey, systemPrompt, userPrompt);
-        if (result) {
-          const parsed = JSON.parse(result);
-          if (parsed.name && parsed.body && parsed.category) {
-            return parsed;
-          }
-        }
-      } catch (err) {
-        console.error(`AI provider ${provider.name} failed for template recommendation:`, err.message);
-      }
-    }
-
+    const result = await aiManager.completeJson({ system: systemPrompt, user: userPrompt, temperature: 0.5, maxTokens: 1200 });
+    if (!result.ok || !result.data) return null;
+    const parsed = result.data;
+    if (parsed.name && parsed.body && parsed.category) return parsed;
     return null;
-  }
-
-  async _callAIProviderAPI(providerType, apiKey, systemPrompt, userPrompt) {
-    if (providerType === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], max_tokens: 800, temperature: 0.7 }),
-        signal: AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`OpenAI error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
-    }
-
-    if (providerType === 'anthropic') {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-3-haiku-20240307', max_tokens: 800, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
-        signal: AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`Anthropic error: ${res.status}`);
-      const data = await res.json();
-      return data.content[0].text;
-    }
-
-    if (providerType === 'groq') {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'llama-3.1-70b-versatile', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], max_tokens: 800, temperature: 0.7 }),
-        signal: AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`Groq error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
-    }
-
-    if (providerType === 'together') {
-      const res = await fetch('https://api.together.xyz/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'meta-llama/Llama-3-70b-chat-hf', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], max_tokens: 800, temperature: 0.7 }),
-        signal: AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`Together error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
-    }
-
-    if (providerType === 'mistral') {
-      const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'mistral-small-latest', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], max_tokens: 800, temperature: 0.7 }),
-        signal: AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`Mistral error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
-    }
-
-    if (providerType === 'deepseek') {
-      const res = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], max_tokens: 800, temperature: 0.7 }),
-        signal: AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`DeepSeek error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
-    }
-
-    if (providerType === 'openrouter') {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}`, 'HTTP-Referer': 'https://whatsapp-shield.app' },
-        body: JSON.stringify({ model: 'openai/gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], max_tokens: 800, temperature: 0.7 }),
-        signal: AbortSignal.timeout(AI_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) throw new Error(`OpenRouter error: ${res.status}`);
-      const data = await res.json();
-      return data.choices[0].message.content;
-    }
-
-    throw new Error(`Unknown provider type: ${providerType}`);
   }
 
   async recommendTemplate(conversationState) {

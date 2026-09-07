@@ -1,0 +1,258 @@
+{
+  "version": 1,
+  "lastUpdated": "2026-01-01T00:00:00.000Z",
+  "graphVersion": "v23.0",
+  "purposeCategories": {
+    "marketing": {
+      "metaCategory": "MARKETING",
+      "label": "Marketing",
+      "recommendation": "Prefer AMP/marketing best practices; include opt-out language and a clear sender identity."
+    },
+    "sales": {
+      "metaCategory": "MARKETING",
+      "label": "Sales",
+      "recommendation": "Keep offers specific and non-misleading; include opt-out text and avoid urgency spam."
+    },
+    "promotion": {
+      "metaCategory": "MARKETING",
+      "label": "Promotion / Offer",
+      "recommendation": "State the offer clearly, include expiry only when genuine, and add opt-out language."
+    },
+    "lead_follow_up": {
+      "metaCategory": "UTILITY",
+      "label": "Lead Follow-up",
+      "recommendation": "Stay service-oriented and specific; avoid promotional hype language."
+    },
+    "customer_support": {
+      "metaCategory": "UTILITY",
+      "label": "Customer Support",
+      "recommendation": "Address the request factually, reference the customer conversation, keep it service-focused."
+    },
+    "appointment": {
+      "metaCategory": "UTILITY",
+      "label": "Appointment",
+      "recommendation": "Clear date/time variables, a way to confirm or reschedule, and no promotional content."
+    },
+    "order_update": {
+      "metaCategory": "UTILITY",
+      "label": "Order Update",
+      "recommendation": "Order-specific facts (number, status, tracking) only; no marketing copy."
+    },
+    "reminder": {
+      "metaCategory": "UTILITY",
+      "label": "Reminder",
+      "recommendation": "One clear reminder; harmless to repeat; avoid selling language."
+    },
+    "authentication": {
+      "metaCategory": "AUTHENTICATION",
+      "label": "Authentication / OTP",
+      "recommendation": "One-time passcode only; single-purpose; no marketing content."
+    },
+    "other": {
+      "metaCategory": "UTILITY",
+      "label": "Other / General",
+      "recommendation": "Select the closest real Meta category before submitting."
+    }
+  },
+  "componentRules": {
+    "name": {
+      "maxLength": 512,
+      "pattern": "^[a-z0-9_]+$",
+      "hint": "Lowercase letters, numbers and underscores, no spaces."
+    },
+    "header": {
+      "allowedTypes": [
+        "TEXT",
+        "IMAGE",
+        "VIDEO",
+        "DOCUMENT",
+        "LOCATION"
+      ],
+      "textMaxLength": 60,
+      "textMinLength": 1,
+      "exampleMaxLength": 60,
+      "hint": "Headers up to 60 characters. Media headers require the media to be hosted on a public URL during submission."
+    },
+    "body": {
+      "maxLength": 1024,
+      "minLength": 1,
+      "maxVariables": 30,
+      "exampleMaxLength": 1024,
+      "hint": "Body up to 1024 characters. Use sequential variables {{1}}, {{2}}, ..."
+    },
+    "footer": {
+      "maxLength": 60,
+      "hint": "Footer up to 60 characters. Great place for sender identity."
+    },
+    "buttons": {
+      "max": 10,
+      "rules": {
+        "QUICK_REPLY": {
+          "textMaxLength": 25,
+          "max": 3
+        },
+        "URL": {
+          "textMaxLength": 25,
+          "max": 2
+        },
+        "PHONE_NUMBER": {
+          "textMaxLength": 25,
+          "max": 2
+        }
+      },
+      "hint": "Quick-reply buttons (max 3), URL buttons (max 2 with https URLs), phone buttons (max 2)."
+    },
+    "language": {
+      "supportedFormat": {}
+    }
+  },
+  "variableRules": {
+    "format": {},
+    "mustStartAtOne": true,
+    "sequential": true,
+    "hint": "Variables must be {{1}}, {{2}}, ... starting at 1, sequential, no gaps."
+  },
+  "restrictedTopics": [
+    {
+      "topic": "financial_services",
+      "terms": [
+        "loans",
+        "credit",
+        "mortgage",
+        "investment",
+        "crypto",
+        "bitcoin",
+        "trading",
+        "trading signals",
+        "guaranteed returns",
+        "double your money"
+      ],
+      "guidance": "Financial claims can require additional Meta review or configuration. Avoid guarantees, returns promises, and unlicensed advice."
+    },
+    {
+      "topic": "healthcare",
+      "terms": [
+        "cure",
+        "heal",
+        "cure cancer",
+        "weight loss guaranteed",
+        "medical miracle",
+        "prescription",
+        "clinically proven"
+      ],
+      "guidance": "Healthcare claims must be accurate and non-deceptive. Avoid miracle cures and guarantees."
+    },
+    {
+      "topic": "betting_gambling",
+      "terms": [
+        "bet",
+        "betting",
+        "gambling",
+        "casino",
+        "slot machine",
+        "win real money",
+        "jackpot"
+      ],
+      "guidance": "Gambling content is restricted in many regions and may require special review."
+    },
+    {
+      "topic": "alcohol_tobacco",
+      "terms": [
+        "cheap cigarettes",
+        "buy alcohol",
+        "smoke deals"
+      ],
+      "guidance": "Age-restricted content categories require compliance review and are unavailable in some regions."
+    },
+    {
+      "topic": "adult",
+      "terms": [
+        "adult content",
+        "nsfw",
+        "escort",
+        "xxx"
+      ],
+      "guidance": "Adult content is not permitted."
+    }
+  ],
+  "contentChecks": [
+    {
+      "id": "promotional_in_utility",
+      "severity": "block",
+      "title": "Promotional content in a service template",
+      "detail": "UTILITY and AUTHENTICATION templates must be strictly service-related. Promotional words trigger rejection.",
+      "fix": "Remove offers, discounts, urgency and selling language. Keep only the factual service information."
+    },
+    {
+      "id": "missing_optout_marketing",
+      "severity": "warning",
+      "title": "Missing opt-out / unsubscribe language",
+      "detail": "Marketing templates should give recipients a clear way to opt out.",
+      "fix": "Append a short opt-out line such as \"Reply STOP to opt out\" in the body or footer."
+    },
+    {
+      "id": "missing_sender_identity",
+      "severity": "warning",
+      "title": "Unclear sender identity",
+      "detail": "Recipients should instantly know who is sending the message.",
+      "fix": "Mention your business or team name in the body, header or footer."
+    },
+    {
+      "id": "urgent_pressure",
+      "severity": "warning",
+      "title": "High-pressure urgency language",
+      "detail": "Excessive urgency can read as spam. Favour calm, factual calls to action.",
+      "fix": "Replace urgency phrases with a neutral, factual version."
+    },
+    {
+      "id": "spam_signals",
+      "severity": "warning",
+      "title": "Spam-like wording or repeated symbols",
+      "detail": "Repeated excitement markers (multiple exclamation marks, all-caps, doubled words) reduce approval odds.",
+      "fix": "Normalize punctuation and tone down attention-grabbing words."
+    },
+    {
+      "id": "misleading_claim",
+      "severity": "block",
+      "title": "Potentially misleading claim",
+      "detail": "Absolute or unverifiable claims are a common rejection reason.",
+      "fix": "Rephrase to be factual and specific, avoiding superlatives and guarantees."
+    },
+    {
+      "id": "uppercase_body",
+      "severity": "warning",
+      "title": "Excessive uppercase text",
+      "detail": "Large blocks of uppercase text read as shouting/spam.",
+      "fix": "Use sentence case for most of the body."
+    },
+    {
+      "id": "emojis",
+      "severity": "warning",
+      "title": "Emojis in template body",
+      "detail": "Emojis are not officially supported in template text and may break rendering.",
+      "fix": "Remove emojis from the body."
+    }
+  ],
+  "ambiguityChecks": [
+    {
+      "id": "vague_customer",
+      "severity": "warning",
+      "title": "Generic/vague recipient wording",
+      "detail": "Templates that keep saying \"customer\" or \"you\" without context can feel templated/spammy.",
+      "fix": "Personalize with variables or reference the specific conversation context."
+    },
+    {
+      "id": "question_body",
+      "severity": "warning",
+      "title": "Open-ended sales question",
+      "detail": "A template that only asks \"Do you want...\" with no value can look like spam.",
+      "fix": "Give clear value and a simple next step instead of a generic ask."
+    }
+  ],
+  "recommendations": {
+    "headerExample": "Use the header for the most important fact (e.g. order number, appointment).",
+    "bodyExample": "Start with the customer need, add 1-2 sentences of clear value, end with one next step.",
+    "buttonExample": "Add one clear call-to-action button rather than many options."
+  },
+  "generalRule": "Templates are rejected when they misrepresent the sender, make impossible claims, lack permission context, or use marketing in service templates. Read receipts, quality rating and messaging limits also come from Meta, not from this tool."
+}

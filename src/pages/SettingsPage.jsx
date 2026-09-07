@@ -38,6 +38,11 @@ import { BusinessProfileSettings } from './components/BusinessProfileSettings';
 import AccountHealthDashboard from './components/AccountHealthDashboard';
 import TemplateManager from './components/TemplateManager';
 import CrmPipeline from './components/CrmPipeline';
+import MetaConnection from './components/meta/MetaConnection';
+import MessageTemplates from './components/meta/MessageTemplates';
+import MetaCampaigns from './components/meta/MetaCampaigns';
+import AiAgents from './components/meta/AiAgents';
+import MetaDashboard from './components/meta/MetaDashboard';
 
 const THEME_OPTIONS = [
   { id: 'system', label: 'System', description: 'Follows your device', icon: Monitor },
@@ -61,6 +66,11 @@ const CATEGORIES = [
   { id: 'ai', label: 'AI Provider Settings', description: 'Providers, keys & priority', icon: Cpu },
   { id: 'business', label: 'Business Profile', description: 'Identity & privacy', icon: Building2 },
   { id: 'safety', label: 'Safety & Anti-Ban', description: 'Account protection', icon: ShieldCheck },
+  { id: 'meta', label: 'Meta WhatsApp', description: 'Official Cloud API connection', icon: Building2 },
+  { id: 'metaTemplates', label: 'Meta Templates', description: 'AI generate, review & approve', icon: FileText },
+  { id: 'metaCampaigns', label: 'Meta Campaigns', description: 'Bulk approved sends', icon: Kanban },
+  { id: 'metaAgents', label: 'Meta AI Agents', description: 'Auto-reply agents', icon: Cpu },
+  { id: 'metaDashboard', label: 'Meta Dashboard', description: 'Live overview & analytics', icon: LayoutDashboard },
 ];
 
 function AppearancePanel() {
@@ -204,6 +214,16 @@ function SettingsControlCenter() {
         return <BusinessProfileSettings isOpen embedded />;
       case 'safety':
         return <SafetySettings isOpen embedded />;
+      case 'meta':
+        return <MetaConnection isOpen embedded />;
+      case 'metaTemplates':
+        return <MessageTemplates isOpen embedded />;
+      case 'metaCampaigns':
+        return <MetaCampaigns isOpen embedded />;
+      case 'metaAgents':
+        return <AiAgents isOpen embedded />;
+      case 'metaDashboard':
+        return <MetaDashboard isOpen embedded />;
       default:
         return <AppearancePanel />;
     }
