@@ -120,7 +120,29 @@ const remove = (id) => {
   secureStore.saveProviders(filtered);
   usageStore.resetUsage(id);
   router.clearCooldown(id);
+  const settings = loadSettings();
+  if (settings.preferredProviderId === id) {
+    saveSettings({ ...settings, preferredProviderId: '' });
+  }
   return true;
+};
+
+const reorder = (orderedIds) => {
+  if (!Array.isArray(orderedIds)) return null;
+  const providers = secureStore.loadProviders();
+  const byId = new Map(providers.map(p => [p.id, p]));
+  if (orderedIds.some(id => !byId.has(id))) return null;
+  const ordered = [];
+  orderedIds.forEach((id, i) => {
+    const p = byId.get(id);
+    p.priority = i;
+    ordered.push(p);
+  });
+  const rest = providers.filter(p => !orderedIds.includes(p.id))
+    .sort((a, b) => (a.priority || 0) - (b.priority || 0));
+  rest.forEach((p, i) => { p.priority = ordered.length + i; ordered.push(p); });
+  secureStore.saveProviders(ordered);
+  return ordered.map(enrichment);
 };
 
 const validateKey = async ({ apiKey, provider, model, baseUrl = '', azureResource = '', azureDeployment = '', apiVersion = '2024-10-21' }) => {
@@ -333,6 +355,7 @@ module.exports = {
   add,
   update,
   remove,
+  reorder,
   validateKey,
   testProvider,
   complete,

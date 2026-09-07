@@ -230,7 +230,7 @@ const parseCohere = (body, model) => {
 const azureRequest = (provider, opts) => {
   const messages = prepareMessages(opts);
   const resource = provider.azureResource || 'your-resource';
-  const deployment = opts.model || provider.model || 'gpt-4o-mini';
+  const deployment = (provider.azureDeployment && provider.azureDeployment.trim()) || opts.model || provider.model || 'gpt-5.4-mini';
   const apiVersion = provider.apiVersion || '2024-10-21';
   const url = `https://${resource}.openai.azure.com/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${apiVersion}`;
   const body = {

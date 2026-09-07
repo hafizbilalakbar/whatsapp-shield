@@ -3103,6 +3103,24 @@ app.post('/api/message-agent/ai-providers', async (req, res) => {
     if (!provider || !apiKey) {
       return res.status(400).json({ error: 'Provider and API key are required' });
     }
+    if (req.body.testOnly) {
+      try {
+        const ok = await aiManager.validateKey({
+          apiKey,
+          provider,
+          model,
+          baseUrl: req.body.baseUrl,
+          azureResource: req.body.azureResource,
+          azureDeployment: req.body.azureDeployment,
+          apiVersion: req.body.apiVersion,
+        });
+        return res.json({ success: true, validation: { status: 'connected', error: null, model: ok.result && ok.result.model } });
+      } catch (err) {
+        const category = err.category || 'UNKNOWN';
+        const message = err.message || 'Connection could not be verified';
+        return res.json({ success: true, validation: { status: 'connection_failed', error: message, category } });
+      }
+    }
     const existing = aiManager.getAll();
     if (existing.length >= aiCatalog.DEFAULT_MAX_PROVIDERS) {
       return res.status(400).json({ error: `Maximum ${aiCatalog.DEFAULT_MAX_PROVIDERS} AI providers allowed` });
@@ -3168,9 +3186,25 @@ app.put('/api/message-agent/ai-providers/:id', (req, res) => {
     const updates = req.body;
     const provider = aiManager.update(id, updates);
     if (!provider) return res.status(404).json({ error: 'Provider not found' });
-    res.json({ success: true, provider: secureRedact(provider), keyPreview: aiManager.decode(provider).slice(-4) });
+    let keyPreview = '';
+    try {
+      const dec = aiManager.decode(provider);
+      if (dec) keyPreview = String(dec).slice(-4);
+    } catch { /* keep empty preview */ }
+    res.json({ success: true, provider: secureRedact(provider), keyPreview });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to update AI provider' });
+  }
+});
+
+app.post('/api/message-agent/ai-providers/reorder', (req, res) => {
+  try {
+    const { orderedIds } = req.body || {};
+    const providers = aiManager.reorder(orderedIds);
+    if (!providers) return res.status(400).json({ error: 'Invalid provider order' });
+    res.json({ success: true, providers });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reorder AI providers' });
   }
 });
 

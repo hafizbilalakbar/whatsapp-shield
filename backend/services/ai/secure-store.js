@@ -64,6 +64,7 @@ const decryptString = (payload) => {
 
 const encodeLegacy = (plain) => Buffer.from(String(plain), 'utf8').toString('base64');
 const decodeLegacy = (encoded) => {
+  if (!encoded) return '';
   try { return Buffer.from(encoded, 'base64').toString('utf8'); } catch { return encoded; }
 };
 
