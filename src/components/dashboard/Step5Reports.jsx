@@ -37,6 +37,9 @@ const Step5Reports = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [exportStates, setExportStates] = useState({ csv: 'idle', txt: 'idle', json: 'idle', pdf: 'idle' });
   const tableContainerRef = useRef(null);
+  const [transferState, setTransferState] = useState('idle');
+  const [transferMsg, setTransferMsg] = useState('');
+  const [transferDetail, setTransferDetail] = useState('');
 
   const setExportState = (key, state) => {
     setExportStates(prev => ({ ...prev, [key]: state }));
@@ -56,6 +59,81 @@ const Step5Reports = () => {
     }
     await new Promise(r => setTimeout(r, 1200));
     setExportState(key, 'idle');
+  };
+
+  const verifiedTransferCount = useMemo(
+    () => resultsList.filter(r => r.exists === true && r.isValidFormat !== false).length,
+    [resultsList]
+  );
+
+  const handleTransferVerified = async () => {
+    if (transferState !== 'idle' || verifiedTransferCount === 0) return;
+    setTransferState('loading');
+    setTransferMsg('');
+    setTransferDetail('');
+    try {
+      let rules = {};
+      try {
+        const rulesRes = await fetch('/api/message-agent/lead-transfer');
+        const rulesData = await rulesRes.json();
+        if (rulesData.success && rulesData.rules) rules = rulesData.rules;
+      } catch { /* use defaults */ }
+      if (rules.enabled === false) {
+        setTransferState('done');
+        setTransferMsg('Transfer disabled');
+        setTransferDetail('Enable it in Message Agent → Settings → Lead Transfer.');
+        return;
+      }
+      const fallbackCampaign = campaignHistory?.[0] || {};
+      const contacts = resultsList
+        .filter(r => r.exists === true && r.isValidFormat !== false)
+        .map(r => ({
+          phone: r.formatted || r.number || r.phone,
+          name: r.displayName || r.verifiedName || '',
+          country: r.detectedCountry || r.country || fallbackCampaign.countryCode || 'Unknown',
+          avatar: r.avatar || null,
+          about: r.about || '',
+          exists: true,
+          isVerified: true,
+          isBusiness: r.isBusiness || false,
+          isValidFormat: true,
+          campaignId: r.campaignId || fallbackCampaign.id || null,
+          campaignDate: r.campaignDate || fallbackCampaign.timestamp || null,
+          validationDate: new Date().toISOString(),
+        }));
+      const res = await fetch('/api/message-agent/import-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contacts,
+          mode: 'manual',
+          metadata: {
+            source: 'whatsapp_shield',
+            campaignId: fallbackCampaign.id || null,
+            campaignDate: fallbackCampaign.timestamp || null,
+            tags: [...(rules.addTags || []), 'shield_verified'],
+            validated: true,
+            defaultJourney: rules.defaultJourney || 'new_lead',
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTransferState('done');
+        setTransferMsg(`${data.added} lead${data.added === 1 ? '' : 's'} transferred`);
+        setTransferDetail(data.skipped > 0 ? `${data.skipped} already in CRM and skipped` : 'Now in your CRM pipeline');
+      } else {
+        setTransferState('idle');
+        window.dispatchEvent(new CustomEvent('ws-toast', {
+          detail: { message: data.error || 'Transfer failed', type: 'error' }
+        }));
+      }
+    } catch {
+      setTransferState('idle');
+      window.dispatchEvent(new CustomEvent('ws-toast', {
+        detail: { message: 'Transfer failed. Check connection and try again.', type: 'error' }
+      }));
+    }
   };
 
   useEffect(() => {
@@ -327,6 +405,42 @@ const Step5Reports = () => {
                 <p className="text-[10px] text-primary px-1 mt-0.5">Exporting: {filterLabel}</p>
               )}
             </div>
+
+            {/* Verified Lead Transfer → Message Agent */}
+            <Card className="border-primary/20 bg-primary/5 shrink-0">
+              <CardHeader className="pb-2 border-b border-primary/10 px-3 py-2.5">
+                <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                  <MessageCircle size={14} className="text-primary" /> Send to Message Agent
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-3 px-3 pb-3 space-y-2">
+                <p className="text-[11px] text-text-secondary leading-relaxed">
+                  Transfer verified leads straight into your AI conversation CRM. Each lead keeps its campaign
+                  provenance, gets validated, and is deduplicated before entering your pipeline.
+                </p>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-text-muted">Verified leads ready</span>
+                  <span className="font-bold text-text-primary">{verifiedTransferCount}</span>
+                </div>
+                <Button
+                  size="sm"
+                  className="w-full bg-primary text-white"
+                  disabled={transferState !== 'idle' || verifiedTransferCount === 0}
+                  onClick={handleTransferVerified}
+                >
+                  {transferState === 'loading' ? (
+                    <><Loader2 size={13} className="animate-spin mr-1" /> Transferring...</>
+                  ) : transferState === 'done' ? (
+                    <><Check size={13} className="mr-1" /> {transferMsg || 'Transferred'}</>
+                  ) : (
+                    <><MessageCircle size={13} className="mr-1" /> Transfer Verified Leads</>
+                  )}
+                </Button>
+                {transferState === 'done' && (
+                  <p className="text-[10px] text-primary text-center">{transferDetail}</p>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
           {/* Right Area — Table */}

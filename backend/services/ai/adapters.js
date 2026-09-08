@@ -3,13 +3,15 @@ const MAX_MESSAGES = 24;
 
 const classifyHttpError = (status, body = '', isAbort = false) => {
   if (isAbort) return { category: 'TIMEOUT', retriable: true, userMessage: 'The provider did not respond in time.' };
+  const text = String(body || '').slice(0, 600);
+  if (/insufficient_quota|credit_balance_exhausted|no credits remaining|out of credits|insufficient.*quota|account has insufficient|add credits|billing|quota exceeded/i.test(text)) {
+    return { category: 'QUOTA', retriable: false, userMessage: 'Your API key is valid, but this account has no credits left on this provider. Please add/buy credits on the provider\u2019s billing page and then try again.' };
+  }
   if (status === 401 || status === 403) return { category: 'AUTH', retriable: false, userMessage: 'Your API key could not be authenticated. Please update your credentials.' };
   if (status === 429) return { category: 'RATE_LIMIT', retriable: true, userMessage: 'The provider is rate-limiting requests. Retrying a backup provider.' };
   if (status >= 500) return { category: 'PROVIDER', retriable: true, userMessage: 'The provider is temporarily unavailable.' };
   if (status === 400 || status === 404 || status === 422 || status === 402) {
-    const text = String(body || '').slice(0, 400);
     if (/invalid api key|authentication/i.test(text)) return { category: 'AUTH', retriable: false, userMessage: 'Your API key could not be authenticated. Please update your credentials.' };
-    if (/insufficient.*quota|account has insufficient|billing|credits/i.test(text)) return { category: 'QUOTA', retriable: false, userMessage: 'Your account has insufficient credits or quota.' };
     if (/model.*(not found|unavailable|does not exist)|not supported|invalid model/i.test(text)) return { category: 'MODEL', retriable: false, userMessage: 'The selected model is unavailable for your account.' };
     return { category: 'INVALID', retriable: false, userMessage: 'The provider rejected the request. Check the model and request content.' };
   }
@@ -49,7 +51,16 @@ const fetchJson = async (url, options, timeoutMs = DEFAULT_TIMEOUT_MS) => {
   }
 };
 
-const prepareMessages = ({ system, user, history }) => {
+const prepareMessages = (opts = {}) => {
+  const { system, user, history } = opts;
+  // Some AI features provide a complete conversation directly; preserve it instead
+  // of silently replacing it with the fallback "Hello" message.
+  if (Array.isArray(opts.messages) && opts.messages.length) {
+    return opts.messages.slice(-MAX_MESSAGES).map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
+      content: typeof m.content === 'string' ? m.content : String(m.content || ''),
+    })).filter(m => m.content.trim());
+  }
   const messages = [];
   if (system) messages.push({ role: 'system', content: String(system) });
   if (Array.isArray(history)) {
@@ -110,16 +121,18 @@ const anthropicRequest = (provider, opts) => {
   const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
   const userMessages = messages.filter(m => m.role !== 'system');
   const spec = opts.catalog || {};
-  const noTemp = spec && spec.noTemp;
+  const modelId = opts.model || provider.model;
+  const modelSpec = Array.isArray(spec.models) ? spec.models.find(m => m.id === modelId) : null;
+  const noTemp = Boolean((modelSpec && modelSpec.noTemp) || spec.noTemp);
   const body = {
-    model: opts.model || provider.model,
+    model: modelId,
     max_tokens: opts.maxTokens || 2000,
     ...(noTemp ? {} : { temperature: opts.temperature ?? 0.7 }),
     messages: userMessages.map(m => ({ role: m.role, content: m.content })),
   };
   if (system) body.system = system;
   return {
-    url: 'https://api.anthropic.com/v1/messages',
+    url: provider.baseUrl || 'https://api.anthropic.com/v1/messages',
     options: {
       method: 'POST',
       headers: {
@@ -199,7 +212,7 @@ const cohereRequest = (provider, opts) => {
     ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
   };
   return {
-    url: 'https://api.cohere.com/v2/chat',
+    url: provider.baseUrl || 'https://api.cohere.com/v2/chat',
     options: {
       method: 'POST',
       headers: {
@@ -253,16 +266,40 @@ const azureRequest = (provider, opts) => {
 };
 
 const builders = {
-  openai: (provider, opts) => openaiRequest(provider, opts, provider.provider === 'openrouter'
-    ? { 'HTTP-Referer': 'https://whatsapp-shield.app', 'X-Title': 'WhatsApp Shield' } : {}),
+  openai: (provider, opts) => openaiRequest(provider, opts),
   'openai-compatible': (provider, opts) => openaiRequest(provider, opts),
   groq: (provider, opts) => openaiRequest(provider, opts),
   mistral: (provider, opts) => openaiRequest(provider, opts),
   deepseek: (provider, opts) => openaiRequest(provider, opts),
-  openrouter: (provider, opts) => openaiRequest(provider, opts, { 'HTTP-Referer': 'https://whatsapp-shield.app', 'X-Title': 'WhatsApp Shield' }),
+  openrouter: (provider, opts) => openaiRequest(provider, opts, { 'HTTP-Referer': 'https://whatsapp-shield.app', 'X-OpenRouter-Title': 'WhatsApp Shield' }),
   together: (provider, opts) => openaiRequest(provider, opts),
   perplexity: (provider, opts) => openaiRequest(provider, opts),
   xai: (provider, opts) => openaiRequest(provider, opts),
+  qwen: (provider, opts) => openaiRequest(provider, opts),
+  moonshot: (provider, opts) => openaiRequest(provider, opts),
+  zai: (provider, opts) => openaiRequest(provider, opts),
+  minimax: (provider, opts) => openaiRequest(provider, opts),
+  cerebras: (provider, opts) => openaiRequest(provider, opts),
+  sambanova: (provider, opts) => openaiRequest(provider, opts),
+  fireworks: (provider, opts) => openaiRequest(provider, opts),
+  novita: (provider, opts) => openaiRequest(provider, opts),
+  huggingface: (provider, opts) => openaiRequest(provider, opts),
+  nvidia: (provider, opts) => openaiRequest(provider, opts),
+  siliconflow: (provider, opts) => openaiRequest(provider, opts),
+  modelscope: (provider, opts) => openaiRequest(provider, opts),
+  yi: (provider, opts) => openaiRequest(provider, opts),
+  internlm: (provider, opts) => openaiRequest(provider, opts),
+  baichuan: (provider, opts) => openaiRequest(provider, opts),
+  stepfun: (provider, opts) => openaiRequest(provider, opts),
+  sensnova: (provider, opts) => openaiRequest(provider, opts),
+  xverse: (provider, opts) => openaiRequest(provider, opts),
+  longcat: (provider, opts) => openaiRequest(provider, opts),
+  replicate: (provider, opts) => openaiRequest(provider, opts),
+  ai21: (provider, opts) => openaiRequest(provider, opts),
+  writer: (provider, opts) => openaiRequest(provider, opts),
+  meta: (provider, opts) => openaiRequest(provider, opts),
+  amazon: (provider, opts) => openaiRequest(provider, opts),
+  microsoft: (provider, opts) => openaiRequest(provider, opts),
   anthropic: anthropicRequest,
   gemini: geminiRequest,
   cohere: cohereRequest,
@@ -279,6 +316,31 @@ const parsers = {
   together: parseOpenAI,
   perplexity: parseOpenAI,
   xai: parseOpenAI,
+  qwen: parseOpenAI,
+  moonshot: parseOpenAI,
+  zai: parseOpenAI,
+  minimax: parseOpenAI,
+  cerebras: parseOpenAI,
+  sambanova: parseOpenAI,
+  fireworks: parseOpenAI,
+  novita: parseOpenAI,
+  huggingface: parseOpenAI,
+  nvidia: parseOpenAI,
+  siliconflow: parseOpenAI,
+  modelscope: parseOpenAI,
+  yi: parseOpenAI,
+  internlm: parseOpenAI,
+  baichuan: parseOpenAI,
+  stepfun: parseOpenAI,
+  sensnova: parseOpenAI,
+  xverse: parseOpenAI,
+  longcat: parseOpenAI,
+  replicate: parseOpenAI,
+  ai21: parseOpenAI,
+  writer: parseOpenAI,
+  meta: parseOpenAI,
+  amazon: parseOpenAI,
+  microsoft: parseOpenAI,
   anthropic: parseAnthropic,
   gemini: parseGemini,
   cohere: parseCohere,
@@ -286,10 +348,12 @@ const parsers = {
 };
 
 const callProvider = async (provider, opts = {}) => {
-  const type = provider.provider || 'openai-compatible';
-  const build = builders[type];
-  if (!build) throw new Error(`Unsupported provider type: ${type}`);
   const spec = opts.catalog || {};
+  const type = spec.chat || provider.provider || 'openai-compatible';
+  // Every remaining catalog entry documents an OpenAI-compatible chat endpoint.
+  // We try the provider-specific builder first, then fall back to openai if chat is 'openai' or 'openai-compatible'.
+  const build = builders[type] || (spec.chat === 'openai' ? builders.openai : spec.chat === 'openai-compatible' ? builders['openai-compatible'] : null);
+  if (!build) throw new Error(`Unsupported provider type: ${type}`);
   const { url, options } = build(provider, { ...opts, catalog: spec });
   const started = Date.now();
   let res;
@@ -307,7 +371,8 @@ const callProvider = async (provider, opts = {}) => {
     throw error;
   }
   const latency = Date.now() - started;
-  const parse = parsers[type];
+  const parse = parsers[type] || (spec.chat === 'openai' ? parsers.openai : null);
+  if (!parse) throw new Error(`Unsupported provider response type: ${type}`);
   const parsed = parse(res.body, opts.model || provider.model);
   if (!parsed.text) {
     const error = new Error('The provider returned an empty response.');

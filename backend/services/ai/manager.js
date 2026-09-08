@@ -64,6 +64,11 @@ const createProviderCfg = ({ provider, apiKey, name, displayName, model, priorit
   if (!catalog.isValidProvider(provider)) throw new Error(`Unsupported provider type: ${provider}`);
   if (!apiKey) throw new Error('API key is required');
   const spec = catalog.getProvider(provider);
+  if (baseUrl) {
+    let parsedUrl;
+    try { parsedUrl = new URL(baseUrl); } catch { throw new Error('Base URL must be a valid HTTPS endpoint'); }
+    if (parsedUrl.protocol !== 'https:') throw new Error('Base URL must use HTTPS');
+  }
   const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
@@ -314,35 +319,239 @@ const completeJson = async (opts = {}) => {
   return { ...result, data: parsed };
 };
 
-const listModels = async (provider, apiKey) => {
-  const spec = catalog.getProvider(provider);
-  const staticModels = catalog.getModels(provider);
+// ──────────── Dynamic Model Discovery ────────────
+
+const FETCH_TIMEOUT = 15000;
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = FETCH_TIMEOUT) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const discoverOpenAIModels = async (apiKey, baseUrl) => {
+  const url = baseUrl
+    ? `${baseUrl.replace(/\/chat\/completions(\?.*)?$/, '')}/models`
+    : 'https://api.openai.com/v1/models';
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body.data || [])
+      .filter(m => m.id && !m.id.includes('embed') && !m.id.includes('whisper') && !m.id.includes('tts') && !m.id.includes('dall-e') && !m.id.includes('image'))
+      .map(m => ({
+        id: m.id,
+        label: m.id,
+        tier: 'live',
+        contextLength: m.context_window || null,
+        ownedBy: m.owned_by || null,
+      }))
+      .slice(0, 100);
+  } catch { return null; }
+};
+
+const discoverAnthropicModels = async (apiKey) => {
+  try {
+    const res = await fetchWithTimeout('https://api.anthropic.com/v1/models', {
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body.data || [])
+      .filter(m => m.id)
+      .map(m => ({
+        id: m.id,
+        label: m.id,
+        tier: 'live',
+        contextLength: m.max_input_tokens || null,
+      }))
+      .slice(0, 40);
+  } catch { return null; }
+};
+
+const discoverGeminiModels = async (apiKey) => {
+  try {
+    const res = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`
+    );
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body.models || [])
+      .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+      .map(m => ({
+        id: m.name ? m.name.replace('models/', '') : null,
+        label: m.displayName || (m.name ? m.name.replace('models/', '') : null),
+        tier: 'live',
+        contextLength: m.inputTokenLimit || null,
+        outputLength: m.outputTokenLimit || null,
+      }))
+      .filter(m => m.id && m.label)
+      .slice(0, 40);
+  } catch { return null; }
+};
+
+const discoverOpenRouterModels = async (apiKey) => {
+  try {
+    const res = await fetchWithTimeout('https://openrouter.ai/api/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body.data || [])
+      .filter(m => m.id)
+      .map(m => ({
+        id: m.id,
+        label: m.name || m.id,
+        tier: m.pricing && (m.pricing.prompt === '0' || m.pricing.completion === '0') ? 'free' : 'live',
+        contextLength: m.context_length || null,
+        pricing: m.pricing ? {
+          prompt: parseFloat(m.pricing.prompt) * 1000000 || 0,
+          completion: parseFloat(m.pricing.completion) * 1000000 || 0,
+        } : null,
+        free: m.pricing && m.pricing.prompt === '0' && m.pricing.completion === '0',
+        maxRequestTokens: m.top_provider && m.top_provider.max_request_tokens || null,
+        maxResponseTokens: m.top_provider && m.top_provider.max_completion_tokens || null,
+      }))
+      .slice(0, 300);
+  } catch { return null; }
+};
+
+const discoverOpenAICompatibleModels = async (apiKey, baseUrl) => {
+  const spec = catalog.getProvider('openai-compatible');
+  const url = baseUrl
+    ? `${baseUrl.replace(/\/chat\/completions(\?.*)?$/, '')}/models`
+    : null;
+  if (!url) return null;
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body.data || [])
+      .filter(m => m.id)
+      .map(m => ({
+        id: m.id,
+        label: m.id,
+        tier: 'live',
+        contextLength: m.context_window || null,
+        ownedBy: m.owned_by || null,
+      }))
+      .slice(0, 100);
+  } catch { return null; }
+};
+
+const discoverCohereModels = async (apiKey) => {
+  try {
+    const res = await fetchWithTimeout('https://api.cohere.ai/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body.models || [])
+      .filter(m => m.id && m.endpoints && m.endpoints.some(e => e.chat))
+      .map(m => ({
+        id: m.id,
+        label: m.id,
+        tier: 'live',
+        contextLength: m.context_length || null,
+      }))
+      .slice(0, 30);
+  } catch { return null; }
+};
+
+const discoverGenericOpenAIModels = async (apiKey, modelsUrl) => {
+  if (!modelsUrl) return null;
+  try {
+    const res = await fetchWithTimeout(modelsUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const models = body.data || body.models || [];
+    return models
+      .filter(m => m.id || m.name)
+      .map(m => ({
+        id: m.id || m.name,
+        label: m.name || m.display_name || m.id || m.name,
+        tier: 'live',
+        contextLength: m.context_length || m.context_window || m.max_input_tokens || null,
+      }))
+      .slice(0, 100);
+  } catch { return null; }
+};
+
+const discoverModels = async (providerType, apiKey, baseUrl) => {
+  const spec = catalog.getProvider(providerType);
+  if (!spec) return [];
+
+  const staticModels = catalog.getModels(providerType);
+
   if (!apiKey) return staticModels;
-  if (provider === 'anthropic') {
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/models', {
-        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      });
-      if (res.ok) {
-        const body = await res.json();
-        const live = (body.data || []).map(m => ({ id: m.id, label: m.id, tier: 'live' }));
-        if (live.length) return live.slice(0, 40);
+
+  // Provider-specific model discovery
+  let live = null;
+
+  switch (spec.modelsApi) {
+    case 'openai':
+      live = await discoverOpenAIModels(apiKey, baseUrl || spec.baseUrl);
+      break;
+    case 'anthropic':
+      live = await discoverAnthropicModels(apiKey);
+      break;
+    case 'gemini':
+      live = await discoverGeminiModels(apiKey);
+      break;
+    case 'openrouter':
+      live = await discoverOpenRouterModels(apiKey);
+      break;
+    default:
+      // Try generic discovery if modelsUrl is available
+      if (spec.modelsUrl) {
+        live = await discoverGenericOpenAIModels(apiKey, spec.modelsUrl);
       }
-    } catch { /* fall back to catalog */ }
-    return staticModels;
+      break;
   }
-  if (provider === 'openai' || provider === 'groq' || provider === 'openrouter' || provider === 'together' || provider === 'mistral' || provider === 'deepseek' || provider === 'xai' || provider === 'perplexity') {
-    const base = spec.baseUrl.replace(/\/chat\/completions(\?.*)?$/, '').replace(/\/messages$/, '');
-    try {
-      const res = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
-      if (res.ok) {
-        const body = await res.json();
-        const live = (body.data || []).map(m => ({ id: m.id, label: m.id, tier: 'live' })).slice(0, 60);
-        if (live.length) return live;
+
+  if (live && live.length > 0) {
+    // Merge with static models: static models get their metadata preserved
+    const staticMap = new Map(staticModels.map(m => [m.id, m]));
+    const merged = live.map(liveModel => {
+      const staticMeta = staticMap.get(liveModel.id);
+      return {
+        ...liveModel,
+        label: staticMeta ? staticMeta.label : (liveModel.label || liveModel.id),
+        tier: staticMeta ? staticMeta.tier : liveModel.tier,
+        contextLength: liveModel.contextLength || (staticMeta && staticMeta.contextLength) || null,
+        pricing: liveModel.pricing || (staticMeta && staticMeta.pricing) || null,
+        free: liveModel.free !== undefined ? liveModel.free : (staticMeta && staticMeta.free) || false,
+        noTemp: staticMeta && staticMeta.noTemp,
+      };
+    });
+
+    // Add any static models not found in live list (as fallback)
+    const liveIds = new Set(merged.map(m => m.id));
+    for (const sm of staticModels) {
+      if (!liveIds.has(sm.id)) {
+        merged.push({ ...sm, tier: sm.tier || 'static' });
       }
-    } catch { /* fall back to catalog */ }
+    }
+
+    return merged.slice(0, 300);
   }
+
   return staticModels;
+};
+
+const listModels = async (provider, apiKey) => {
+  return discoverModels(provider, apiKey);
 };
 
 module.exports = {
@@ -362,6 +571,7 @@ module.exports = {
   completeJson,
   extractJson,
   listModels,
+  discoverModels,
   decode,
   SETTINGS_FILE,
 };

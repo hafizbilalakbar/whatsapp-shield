@@ -570,6 +570,52 @@ export const MessageAgentProvider = ({ children, ws }) => {
   const generateAiResponse = useCallback(async (message, conversationHistory, conversation = null) => {
     try {
       const contact = conversation?.contact || null;
+      let orchestratorEnabled = false;
+      try { orchestratorEnabled = window.localStorage.getItem('aiOrchestratorEnabled') === '1'; } catch { /* ignore */ }
+
+      // AI Orchestrator fast-path: intent -> specialized agent -> reply + suggested CRM stage.
+      if (orchestratorEnabled) {
+        const payloadMessage = message
+          || ((Array.isArray(conversationHistory) && conversationHistory.length)
+            ? (conversationHistory[conversationHistory.length - 1]?.text || conversationHistory[conversationHistory.length - 1]?.content || '')
+            : '');
+        try {
+          const orchRes = await fetch('/api/message-agent/ai-orchestrator', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: payloadMessage, history: conversationHistory, contact }),
+          });
+          const orchData = await orchRes.json();
+          if (orchData.success && orchData.reply && !orchData.fallback) {
+            if (orchData.suggestedStage && conversation?.id) {
+              updateConversation(conversation.id, { journey: orchData.suggestedStage }).catch(() => {});
+            }
+            if (conversation?.id && Array.isArray(orchData.tags) && orchData.tags.length) {
+              const existing = new Set(conversation.tags || []);
+              const merged = [...existing, ...orchData.tags.filter(t => !existing.has(t))];
+              if (merged.length) updateConversation(conversation.id, { tags: merged }).catch(() => {});
+            }
+            if (orchData.handoff && orchData.humanNote) {
+              window.dispatchEvent(new CustomEvent('ws-toast', {
+                detail: { message: `AI suggests human handoff — ${orchData.humanNote}`, type: 'info' }
+              }));
+            }
+            return {
+              response: orchData.reply,
+              provider: orchData.provider,
+              model: orchData.model,
+              confidence: orchData.confidence,
+              agent: orchData.agent,
+              agentName: orchData.agentName,
+              orchestrator: true,
+              handoff: orchData.handoff,
+            };
+          }
+        } catch (err) {
+          console.error('Orchestrator failed, falling back to ai-generate:', err);
+        }
+      }
+
       const res = await fetch('/api/message-agent/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -594,7 +640,7 @@ export const MessageAgentProvider = ({ children, ws }) => {
       console.error('Error generating AI response:', err);
       return null;
     }
-  }, [businessProfile]);
+  }, [businessProfile, updateConversation]);
 
   const filteredConversations = useMemo(() => {
     let filtered = conversations;

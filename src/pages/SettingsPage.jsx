@@ -57,22 +57,40 @@ const shieldWorkspace = [
   { to: '/history', label: 'History', description: 'Past campaigns, exports & data management', icon: History },
 ];
 
-const CATEGORIES = [
-  { id: 'appearance', label: 'Appearance', description: 'Theme & interface look', icon: Palette },
-  { id: 'shield', label: 'WhatsApp Shield', description: 'Validation workspace', icon: Shield },
-  { id: 'analytics', label: 'Analytics Dashboard', description: 'Performance insights', icon: BarChart3 },
-  { id: 'health', label: 'Account Health', description: 'Safety monitoring', icon: HeartPulse },
-  { id: 'crm', label: 'CRM Pipeline', description: 'Stages & deals', icon: Kanban },
-  { id: 'templates', label: 'Template Manager', description: 'Message templates', icon: FileText },
-  { id: 'ai', label: 'AI Provider Settings', description: 'Providers, keys & priority', icon: Cpu },
-  { id: 'business', label: 'Business Profile', description: 'Identity & privacy', icon: Building2 },
-  { id: 'safety', label: 'Safety & Anti-Ban', description: 'Account protection', icon: ShieldCheck },
-  { id: 'meta', label: 'Meta WhatsApp', description: 'Official Cloud API connection', icon: Building2 },
-  { id: 'metaTemplates', label: 'Meta Templates', description: 'AI generate, review & approve', icon: FileText },
-  { id: 'metaCampaigns', label: 'Meta Campaigns', description: 'Bulk approved sends', icon: Kanban },
-  { id: 'metaAgents', label: 'Meta AI Agents', description: 'Auto-reply agents', icon: Cpu },
-  { id: 'metaDashboard', label: 'Meta Dashboard', description: 'Live overview & analytics', icon: LayoutDashboard },
+const SECTIONS = [
+  { title: 'Setup', steps: '01', items: [
+    { id: 'appearance', label: 'Appearance', description: 'Theme & interface look', icon: Palette },
+    { id: 'shield', label: 'WhatsApp Shield', description: 'Validation workspace', icon: Shield },
+  ]},
+  { title: 'Monitor', steps: '02', items: [
+    { id: 'analytics', label: 'Analytics Dashboard', description: 'Performance insights', icon: BarChart3 },
+    { id: 'health', label: 'Account Health', description: 'Safety monitoring', icon: HeartPulse },
+  ]},
+  { title: 'Sales Engine', steps: '03', items: [
+    { id: 'crm', label: 'CRM Pipeline', description: 'Stages & deals', icon: Kanban },
+    { id: 'templates', label: 'Template Manager', description: 'Message templates', icon: FileText },
+    { id: 'ai', label: 'AI Provider Settings', description: 'Providers, keys & priority', icon: Cpu },
+  ]},
+  { title: 'Business Profile', steps: '04', items: [
+    { id: 'business', label: 'Business Profile', description: 'Identity & privacy', icon: Building2 },
+    { id: 'safety', label: 'Safety & Anti-Ban', description: 'Account protection', icon: ShieldCheck },
+  ]},
+  { title: 'Official Channel', steps: '05', items: [
+    { id: 'meta', label: 'Meta WhatsApp', description: 'Official Cloud API connection', icon: Building2 },
+    { id: 'metaTemplates', label: 'Meta Templates', description: 'AI generate, review & approve', icon: FileText },
+    { id: 'metaCampaigns', label: 'Meta Campaigns', description: 'Bulk approved sends', icon: Kanban },
+    { id: 'metaAgents', label: 'Meta AI Agents', description: 'Auto-reply agents', icon: Cpu },
+    { id: 'metaDashboard', label: 'Meta Dashboard', description: 'Live overview & analytics', icon: LayoutDashboard },
+  ]},
 ];
+
+const ALL_CATEGORIES = SECTIONS.flatMap(s => s.items);
+const FLAT_IDS = ALL_CATEGORIES.map(c => c.id);
+
+const nextCategoryId = (id) => {
+  const i = FLAT_IDS.indexOf(id);
+  return i >= 0 && i < FLAT_IDS.length - 1 ? FLAT_IDS[i + 1] : null;
+};
 
 function AppearancePanel() {
   const { theme, resolvedTheme, setTheme } = useTheme();
@@ -193,7 +211,10 @@ function SettingsControlCenter() {
   const { safetySettings } = useMessageAgent();
 
   const protectionActive = !!safetySettings?.antiBan?.enabled && !!safetySettings?.rateLimiting?.enabled;
-  const active = CATEGORIES.find(c => c.id === activeCategory);
+  const active = ALL_CATEGORIES.find(c => c.id === activeCategory);
+  const activeStepIndex = SECTIONS.findIndex(s => s.items.some(c => c.id === activeCategory));
+  const nextCatId = nextCategoryId(activeCategory);
+  const nextCat = nextCatId ? ALL_CATEGORIES.find(c => c.id === nextCatId) : null;
 
   const renderPanel = () => {
     switch (activeCategory) {
@@ -252,28 +273,37 @@ function SettingsControlCenter() {
       </div>
 
       {/* Mobile category pills */}
-      <div className="lg:hidden -mx-4 px-4 overflow-x-auto no-scrollbar mb-5">
-        <div className="flex gap-1.5 min-w-max">
-          {CATEGORIES.map(cat => {
-            const isActive = activeCategory === cat.id;
-            const Icon = cat.icon;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium border transition-all duration-150 whitespace-nowrap",
-                  isActive
-                    ? "bg-primary text-white border-primary shadow-[0_2px_10px_rgba(0,184,110,0.35)]"
-                    : "bg-surface border-border/70 text-text-secondary hover:border-primary/40 hover:text-text-primary"
-                )}
-              >
-                <Icon size={13} />
-                {cat.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="lg:hidden -mx-4 px-4 overflow-x-auto no-scrollbar mb-4 space-y-3">
+        {SECTIONS.map((section, si) => (
+          <div key={section.title} className="min-w-max">
+            <div className="flex items-center gap-1.5 mb-1 px-0.5">
+              <span className="text-[9px] font-bold text-primary uppercase tracking-widest">{section.steps}</span>
+              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">{section.title}</span>
+              {si < SECTIONS.length - 1 && <ChevronRight size={9} className="text-text-muted/40" />}
+            </div>
+            <div className="flex gap-1.5">
+              {section.items.map(cat => {
+                const isActive = activeCategory === cat.id;
+                const Icon = cat.icon;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setActiveCategory(cat.id)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium border transition-all duration-150 whitespace-nowrap",
+                      isActive
+                        ? "bg-primary text-white border-primary shadow-[0_2px_10px_rgba(0,184,110,0.35)]"
+                        : "bg-surface border-border/70 text-text-secondary hover:border-primary/40 hover:text-text-primary"
+                    )}
+                  >
+                    <Icon size={13} />
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-6">
@@ -281,32 +311,69 @@ function SettingsControlCenter() {
         <aside className="hidden lg:block">
           <nav className="sticky top-20 bg-surface/80 backdrop-blur-xl border border-border rounded-2xl p-2.5 flex flex-col gap-0.5 shadow-sm shadow-black/5">
             <div className="px-3 pb-2 pt-1.5 text-[10px] text-text-muted uppercase tracking-widest font-semibold flex items-center gap-1.5">
-              <Activity size={10} className="text-primary" /> Navigation
+              <Activity size={10} className="text-primary" /> Setup Funnel
             </div>
-            {CATEGORIES.map(cat => {
-              const isActive = activeCategory === cat.id;
-              const Icon = cat.icon;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    "group relative w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all duration-150 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                    isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-text-secondary hover:bg-surface hover:text-text-primary"
-                  )}
-                >
+
+            {/* Funnel progress */}
+            <div className="px-3 pb-3 border-b border-border/60 mb-1">
+              <div className="flex items-center gap-1">
+                {SECTIONS.map((s, i) => (
+                  <button
+                    key={s.title}
+                    onClick={() => setActiveCategory(s.items[0].id)}
+                    title={`${s.steps} · ${s.title}`}
+                    className={cn(
+                      'group relative flex-1 h-1.5 rounded-full transition-colors duration-200',
+                      i <= activeStepIndex ? 'bg-gradient-to-r from-primary to-[#25D366]' : 'bg-border/70 hover:bg-border'
+                    )}
+                    aria-label={`Step ${s.steps}: ${s.title}`}
+                  >
+                    <span className="absolute right-0 -top-4 hidden group-hover:inline text-[8px] text-text-muted whitespace-nowrap">{s.steps}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[10px] text-text-muted">
+                Step {SECTIONS[activeStepIndex]?.steps} of 05 — {SECTIONS[activeStepIndex]?.title}
+              </p>
+            </div>
+
+            {SECTIONS.map((section, si) => (
+              <div key={section.title} className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-0.5">
                   <span className={cn(
-                    "absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-gradient-to-b from-primary to-[#25D366] transition-all duration-200",
-                    isActive ? "h-5 opacity-100" : "h-0 opacity-0"
-                  )} />
-                  <Icon size={15} className={cn("shrink-0 transition-colors", isActive ? "text-primary" : "text-text-muted group-hover:text-primary/70")} />
-                  <span className="truncate">{cat.label}</span>
-                </button>
-              );
-            })}
+                    "w-4 h-4 rounded-md flex items-center justify-center text-[8px] font-bold",
+                    si <= activeStepIndex ? "bg-primary/15 text-primary" : "bg-border/40 text-text-muted"
+                  )}>
+                    {section.steps}
+                  </span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-text-muted">{section.title}</span>
+                </div>
+                {section.items.map(cat => {
+                  const isActive = activeCategory === cat.id;
+                  const Icon = cat.icon;
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => setActiveCategory(cat.id)}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={cn(
+                        "group relative w-full flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all duration-150 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                        isActive
+                          ? "bg-primary/10 text-primary"
+                          : "text-text-secondary hover:bg-surface hover:text-text-primary"
+                      )}
+                    >
+                      <span className={cn(
+                        "absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-gradient-to-b from-primary to-[#25D366] transition-all duration-200",
+                        isActive ? "h-5 opacity-100" : "h-0 opacity-0"
+                      )} />
+                      <Icon size={15} className={cn("shrink-0 transition-colors", isActive ? "text-primary" : "text-text-muted group-hover:text-primary/70")} />
+                      <span className="truncate">{cat.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
 
             <div className="mt-3 pt-3 border-t border-border/60 px-3 flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-success/10 border border-success/20 flex items-center justify-center shrink-0">
@@ -323,7 +390,48 @@ function SettingsControlCenter() {
         </aside>
 
         {/* Workspace */}
-        <section className="min-w-0 h-[calc(100dvh_-_240px)] min-h-[30rem] lg:h-[calc(100dvh_-_190px)] lg:min-h-[32rem]">
+        <section className="min-w-0 h-[calc(100dvh_-_240px)] min-h-[30rem] lg:h-[calc(100dvh_-_190px)] lg:min-h-[32rem] flex flex-col gap-3">
+          {activeCategory === 'business' && (
+            <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-primary/25 bg-primary/5">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <Building2 size={15} className="text-primary mt-0.5 shrink-0" />
+                <p className="text-[12px] text-text-secondary leading-snug">
+                  <span className="font-semibold text-text-primary">Next in your funnel:</span> connect your official Meta / WhatsApp Cloud API channel once your Business Profile is complete.
+                </p>
+              </div>
+              <Button size="sm" onClick={() => setActiveCategory('meta')} className="shrink-0 bg-primary text-white w-full sm:w-auto">
+                Continue to Meta WhatsApp <ChevronRight size={13} className="ml-1" />
+              </Button>
+            </div>
+          )}
+          {activeCategory === 'meta' && (
+            <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-primary/25 bg-primary/5">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <Building2 size={15} className="text-primary mt-0.5 shrink-0" />
+                <p className="text-[12px] text-text-secondary leading-snug">
+                  <span className="font-semibold text-text-primary">Go-live checklist:</span> complete your Business Profile, then generate &amp; approve templates before launching campaigns or AI agents.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                <Button size="sm" variant="outline" onClick={() => setActiveCategory('business')} className="flex-1 sm:flex-none">Business Profile</Button>
+                <Button size="sm" onClick={() => setActiveCategory('metaTemplates')} className="flex-1 sm:flex-none bg-primary text-white">Meta Templates</Button>
+              </div>
+            </div>
+          )}
+          {nextCat && (
+            <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5">
+              <span className="text-[10px] text-text-muted uppercase tracking-widest font-semibold hidden sm:block">
+                Funnel step {SECTIONS[activeStepIndex].steps} of 05
+              </span>
+              <button
+                onClick={() => setActiveCategory(nextCat.id)}
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors ml-auto"
+              >
+                Next: {nextCat.label}
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
           <AnimatePresence mode="wait">
             <motion.div
               key={activeCategory}
@@ -331,7 +439,7 @@ function SettingsControlCenter() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="h-full"
+              className="flex-1 min-h-0"
             >
               {renderPanel()}
             </motion.div>

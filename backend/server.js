@@ -2655,7 +2655,7 @@ app.post('/api/message-agent/message/delete', (req, res) => {
 // Bulk import contacts from WhatsApp Shield detection results
 app.post('/api/message-agent/import-bulk', importBulkLimiter.middleware(), async (req, res) => {
   try {
-    const { contacts: importContacts, mode = 'manual' } = req.body;
+    const { contacts: importContacts, mode = 'manual', metadata = {} } = req.body;
     if (!importContacts || !Array.isArray(importContacts) || importContacts.length === 0) {
       return res.status(400).json({ error: 'No contacts provided' });
     }
@@ -2666,6 +2666,13 @@ app.post('/api/message-agent/import-bulk', importBulkLimiter.middleware(), async
     if (importContacts.length > MAX_IMPORT_CONTACTS) {
       return res.status(400).json({ error: `Cannot import more than ${MAX_IMPORT_CONTACTS} contacts at once.` });
     }
+
+    // Verified Lead Transfer rules: allow a staged pipeline + default journey for
+    // leads coming out of WhatsApp Shield detection campaigns.
+    const TRANSFER_RULES_FILE = path.join(__dirname, 'transfer_rules.json');
+    let transferRules = {};
+    try { transferRules = JSON.parse(fs.readFileSync(TRANSFER_RULES_FILE, 'utf8')); } catch (_) {}
+    const importedJourney = transferRules.defaultJourney || metadata.defaultJourney || 'new_lead';
 
     const existingContacts = loadContacts();
     const added = [];
@@ -2690,32 +2697,42 @@ app.post('/api/message-agent/import-bulk', importBulkLimiter.middleware(), async
         continue;
       }
 
+      const isVerified = item.isVerified || item.verified === true || metadata.verified === true || false;
+      const itemTags = Array.isArray(item.tags) ? item.tags : [];
+      const metaTags = Array.isArray(metadata.tags) ? metadata.tags : [];
+      const tags = [...new Set([...(transferRules.addTags || []), ...itemTags, ...metaTags].filter(Boolean))].slice(0, 8);
+
+      const uploadedAt = new Date().toISOString();
       const newContact = {
         id: `contact_${cleanPhone}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         phone: e164Phone,
         name: item.name || item.displayName || e164Phone,
-        country: item.country || item.detectedCountry || 'Unknown',
+        country: item.country || item.detectedCountry || metadata.country || 'Unknown',
         avatar: item.avatar || null,
         about: item.about || '',
         exists: item.exists !== false,
-        isVerified: item.isVerified || false,
+        isVerified,
         isBusiness: item.isBusiness || false,
         mode,
         pinned: false,
         archived: false,
         starred: false,
-        tags: [],
+        tags,
         notes: '',
-        journey: 'new_lead',
+        journey: item.journey || importedJourney,
         crm: null,
         unread: 0,
         status: 'offline',
-        source: 'whatsapp_shield',
+        source: metadata.source || 'whatsapp_shield',
+        // Shield campaign + validation provenance (Verified Lead Transfer)
+        campaignId: item.campaignId || metadata.campaignId || null,
+        campaignDate: item.campaignDate || metadata.campaignDate || null,
+        shieldValidatedAt: (isVerified || metadata.validated === true) ? (item.validationDate || metadata.validationDate || uploadedAt) : null,
         saved: false,
         savedAt: null,
         ownerPhone: sessionOwnerPhone(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: uploadedAt,
+        updatedAt: uploadedAt,
       };
       existingContacts.unshift(newContact);
       added.push(newContact);
@@ -3247,6 +3264,18 @@ app.get('/api/message-agent/ai-providers/:id/models', async (req, res) => {
   }
 });
 
+app.post('/api/message-agent/ai-providers/discover-models', async (req, res) => {
+  try {
+    const { provider, apiKey, baseUrl } = req.body;
+    if (!provider) return res.status(400).json({ error: 'Provider type is required' });
+    if (!apiKey) return res.status(400).json({ error: 'API key is required' });
+    const models = await aiManager.discoverModels(provider, apiKey, baseUrl);
+    res.json({ success: true, models, count: models.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to discover models' });
+  }
+});
+
 // AI generate response endpoint
 app.post('/api/message-agent/ai-generate', aiGenerateLimiter.middleware(), async (req, res) => {
   try {
@@ -3429,6 +3458,71 @@ app.put('/api/message-agent/business-profile', (req, res) => {
     res.json({ success: true, profile });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save business profile' });
+  }
+});
+
+// --- Meta / WhatsApp Cloud API (AI Agents, official templates & campaigns, inbox, dashboard) ---
+const { createMetaRouter } = require('./services/meta/meta-router');
+app.use('/api/meta', createMetaRouter({ sessionOwnerPhone, broadcastAll }));
+
+// --- AI Orchestrator: central decision layer (intent -> agent -> action -> CRM) ---
+const { runOrchestrator } = require('./services/ai/orchestrator');
+app.post('/api/message-agent/ai-orchestrator', async (req, res) => {
+  try {
+    const result = await runOrchestrator(req.body || {});
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('AI Orchestrator error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Orchestrator failed' });
+  }
+});
+
+app.post('/api/message-agent/ai-orchestrator/handoff', async (req, res) => {
+  try {
+    const { generateSummary } = require('./services/ai/orchestrator');
+    const { conversation = {}, contact = {}, providerId, model } = req.body || {};
+    const summary = await generateSummary({ conversation, contact, providerId, model });
+    res.json({ success: true, summary });
+  } catch (err) {
+    console.error('AI Orchestrator handoff error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Handoff summary failed' });
+  }
+});
+
+// --- Verified Lead Transfer settings (Shield -> Message Agent) ---
+const TRANSFER_RULES_FILE = path.join(__dirname, 'transfer_rules.json');
+const DEFAULT_TRANSFER_RULES = {
+  enabled: true,
+  defaultJourney: 'new_lead',
+  addTags: ['shield_verified'],
+  mapShieldStage: { registered: 'new_lead', unregistered: 'new_lead' },
+  skipUnregistered: false,
+};
+
+app.get('/api/message-agent/lead-transfer', (req, res) => {
+  try {
+    const rules = Object.assign({}, DEFAULT_TRANSFER_RULES, loadJsonFile(TRANSFER_RULES_FILE, {}));
+    res.json({ success: true, rules });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load lead transfer settings' });
+  }
+});
+
+app.put('/api/message-agent/lead-transfer', (req, res) => {
+  try {
+    const body = req.body || {};
+    const next = Object.assign({}, DEFAULT_TRANSFER_RULES, {
+      enabled: body.enabled !== undefined ? !!body.enabled : DEFAULT_TRANSFER_RULES.enabled,
+      defaultJourney: body.defaultJourney || DEFAULT_TRANSFER_RULES.defaultJourney,
+      addTags: Array.isArray(body.addTags) ? body.addTags.slice(0, 8) : DEFAULT_TRANSFER_RULES.addTags,
+      mapShieldStage: body.mapShieldStage && typeof body.mapShieldStage === 'object' ? body.mapShieldStage : DEFAULT_TRANSFER_RULES.mapShieldStage,
+      skipUnregistered: !!body.skipUnregistered,
+    }, { updatedAt: new Date().toISOString() });
+    saveJsonFile(TRANSFER_RULES_FILE, next);
+    res.json({ success: true, rules: next });
+  } catch (err) {
+    console.error('Error saving lead transfer settings:', err);
+    res.status(500).json({ error: 'Failed to save lead transfer settings' });
   }
 });
 
